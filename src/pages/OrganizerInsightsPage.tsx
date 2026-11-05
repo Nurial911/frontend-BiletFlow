@@ -9,6 +9,7 @@ import {
 import { getOrganizerEvents, getOrganizerProfile, getTicketTypes } from "../api/events";
 import { Button, buttonClass } from "../components/ui/Button";
 import { formatPrice, formatShortDate } from "../lib/format";
+import { getEventTicketSaleState } from "../lib/ticketSales";
 import type { Event, EventStaff, TicketType } from "../api/types";
 
 interface EventSales {
@@ -83,6 +84,7 @@ function EventSalesCard({ row }: { row: EventSales }) {
   const sold = row.ticketTypes.reduce((sum, ticket) => sum + ticket.sold, 0);
   const available = row.ticketTypes.reduce((sum, ticket) => sum + ticket.available, 0);
   const gross = row.ticketTypes.reduce((sum, ticket) => sum + ticket.sold * ticket.price, 0);
+  const saleState = getEventTicketSaleState(row.ticketTypes);
 
   return (
     <article className="rounded-xl border p-4">
@@ -95,6 +97,16 @@ function EventSalesCard({ row }: { row: EventSales }) {
           Сотрудники события
         </Link>
       </div>
+      {saleState === "sold-out" && (
+        <p role="status" className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">
+          Все доступные билеты распроданы.
+        </p>
+      )}
+      {saleState === "sales-ended" && (
+        <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+          Дедлайн покупки прошёл: продажи билетов завершены.
+        </p>
+      )}
       <div className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
         <p>Продано: <strong>{sold}</strong></p>
         <p>Осталось: <strong>{available}</strong></p>

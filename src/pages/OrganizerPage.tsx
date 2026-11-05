@@ -30,6 +30,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Button, buttonClass } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { EventPoster } from "../components/events/EventPoster";
+import { formatTicketSalesEnd, getEventTicketSaleState, getTicketSaleState } from "../lib/ticketSales";
 
 const isOrganizer = (role: string) => role.trim().toUpperCase().replace(/^ROLE_/, "") === "ORGANIZER";
 
@@ -477,12 +478,23 @@ export function OrganizerTicketsPage() {
   }
 
   const tickets = ticketTypes.data ?? [];
+  const saleState = getEventTicketSaleState(tickets);
   const allocated = tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
   const remaining = event.data.capacity == null ? null : Math.max(event.data.capacity - allocated, 0);
 
   return (
     <div className="max-w-3xl space-y-6">
       <PosterManager event={event.data} />
+      {saleState === "sold-out" && (
+        <p role="status" className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800">
+          Все доступные билеты на мероприятие распроданы.
+        </p>
+      )}
+      {saleState === "sales-ended" && (
+        <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+          Срок продажи билетов завершён. Билеты, не проданные до дедлайна, больше недоступны для покупки.
+        </p>
+      )}
       <div>
         <p className="text-sm text-muted">Новое событие сохранено</p>
         <h2 className="mt-1 text-xl font-bold">Билеты: {event.data.title}</h2>
@@ -527,6 +539,7 @@ export function OrganizerTicketsPage() {
 }
 
 function TicketTypeCard({ ticket }: { ticket: TicketType }) {
+  const saleState = getTicketSaleState(ticket);
   return (
     <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
       <div>
@@ -535,6 +548,15 @@ function TicketTypeCard({ ticket }: { ticket: TicketType }) {
         <p className="mt-1 text-sm text-muted">
           {ticket.price === 0 ? "Бесплатно" : `${ticket.price} ₸`} · Доступно: {ticket.available} из {ticket.quantity}
         </p>
+        {saleState === "sold-out" && <p className="mt-1 text-sm font-semibold text-red-700">Билеты этого типа распроданы</p>}
+        {saleState === "sales-ended" && (
+          <p className="mt-1 text-sm font-semibold text-amber-800">
+            Продажи завершены{ticket.salesEnd ? ` ${formatTicketSalesEnd(ticket.salesEnd)}` : ""}
+          </p>
+        )}
+        {saleState === "not-started" && ticket.salesStart && (
+          <p className="mt-1 text-sm text-muted">Продажи начнутся {formatTicketSalesEnd(ticket.salesStart)}</p>
+        )}
       </div>
       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${ticket.hidden ? "bg-gray-100 text-gray-700" : "bg-green-100 text-green-800"}`}>
         {ticket.hidden ? "Скрыт" : "Активен"}
