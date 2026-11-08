@@ -8,6 +8,7 @@ import type {
   Page,
   TicketType,
   UpdateEventRequest,
+  UpdateTicketTypeRequest,
   Venue,
 } from "./types";
 
@@ -49,6 +50,12 @@ export const getEventPoster = (posterUrl: string) => apiBlob(posterUrl);
 export const createTicketType = (eventId: number, ticketType: CreateTicketTypeRequest) =>
   api<TicketType>(`/api/events/${eventId}/ticket-types`, { method: "POST", body: ticketType });
 
+export const updateTicketType = (ticketTypeId: number, ticketType: UpdateTicketTypeRequest) =>
+  api<TicketType>(`/api/ticket-types/${ticketTypeId}`, { method: "PUT", body: ticketType });
+
+export const setTicketTypeHidden = (ticketTypeId: number, hidden: boolean) =>
+  api<TicketType>(`/api/ticket-types/${ticketTypeId}/${hidden ? "hide" : "unhide"}`, { method: "POST" });
+
 export const createEvent = (event: CreateEventRequest) =>
   api<Event>("/api/events", { method: "POST", body: event });
 
@@ -59,3 +66,9 @@ export type EventManagementAction = "publish" | "unpublish" | "cancel";
 
 export const manageEvent = (eventId: number, action: EventManagementAction) =>
   api<Event>(`/api/events/${eventId}/${action}`, { method: "POST" });
+
+export const setEventSuspended = (eventId: number, suspended: boolean, reason = "") =>
+  api<Event>(`/api/events/${eventId}/${suspended ? "suspend" : "unsuspend"}`, {
+    method: "POST",
+    ...(suspended ? { body: { reason } } : {}),
+  });

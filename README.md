@@ -12,9 +12,9 @@ React + TypeScript + Vite + Tailwind CSS. Talks to the team backend at
 | Order confirmation: order summary, free-ticket confirmation, simulated payment | `/orders/{id}` | `POST /api/orders`, `GET /api/orders/{id}`, `POST /api/orders/{id}/pay` |
 | Attendee account: own orders, tickets, ticket QR, pending order cancellation | `/account` | `GET`/`POST /api/orders`, `GET /api/tickets`, `GET /api/tickets/{ticketId}/qr`, `POST /api/orders/{orderId}/cancel` |
 | Event staff check-in: assigned events, attendee search, scanning and check-in stats | `/staff` | `/api/check-in/events`, `/api/check-in/events/{eventId}/attendees`, `/scan`, `/stats`, `/{ticketId}/undo` |
-| Platform user administration: list, update email/password, delete users | `/admin/users` | `GET /api/users`, `PUT /api/users/{id}`, `DELETE /api/users/{id}` |
+| Platform user administration and event moderation | `/admin/users` | `GET /api/users`, `PUT /api/users/{id}`, `PUT /api/users/{id}/role`, `DELETE /api/users/{id}`, `GET /api/events`, event suspend/unsuspend endpoints |
 | Login / registration window (email + password) | "Войти" button | `POST /api/auth/login`, `POST /api/auth/register`, `GET /api/users/me` |
-| Organizer dashboard: events, tickets, sales counters, and event staff assignment | `/organizer/events` | `GET /api/organizers/profile`, `GET /api/events/organizer/{organizerId}`, `GET`/`POST /api/venues`, `POST /api/events`, `GET`/`PUT /api/events/{id}`, `GET`/`POST /api/events/{id}/ticket-types`, `/api/events/{eventId}/staff`, poster upload/delete endpoints, event publish/unpublish/cancel endpoints |
+| Organizer dashboard: events, editable tickets, official sales/order reports, and staff assignment | `/organizer/events` | Organizer profile and event endpoints, `GET`/`POST /api/venues`, event CRUD and lifecycle endpoints, ticket type create/update/hide/unhide endpoints, `/api/organizer/sales/events`, `/api/organizer/events/{eventId}/sales`, `/api/organizer/events/{eventId}/orders`, `/api/events/{eventId}/staff`, poster endpoints |
 
 ## Organizer dashboard and backend integration
 
@@ -49,6 +49,9 @@ price, quantity, and optional sales window. Multiple ticket types (for example
 Standard and VIP) can be added. The backend validates aggregate ticket
 quantities against the event capacity. Poster upload and deletion are also
 available from ticket setup and event editing.
+Existing ticket types can be edited, hidden, and unhidden with the ticket-type
+management endpoints. Quantity cannot be reduced below tickets already sold;
+the backend remains the source of truth for capacity and order constraints.
 
 When publishing a draft, the dashboard checks whether it has any visible
 available ticket types. If not, it asks the organizer to add tickets first or
@@ -56,20 +59,20 @@ confirm publishing without tickets.
 For a published event with no ticket types, the public event page and event
 card display "Билеты не требуются" instead of offering ticket purchase.
 
-The organizer's Sales tab aggregates ticket-type `sold` and `available`
-counters across their events. Its amount is an estimate (`sold × ticket price`),
-not a settlement or authoritative revenue report: the current backend API has
-no organizer order list or sales analytics endpoint. Organizers can also assign
-and remove event staff by email.
+The organizer's Sales tab uses the backend's official sales summary, event
+sales, and paginated event-order endpoints. It displays paid/pending/cancelled/
+expired orders, tickets sold and reserved, backend revenue, ticket-type
+breakdowns, daily sales, and searchable/filterable order lists. Organizers can
+also assign and remove event staff by email.
 
 The attendee account at `/account` lists the signed-in user's paginated orders
 and tickets, shows ticket QR codes, and allows cancellation of pending orders.
 The staff check-in page at `/staff` exposes only assigned events and uses the
 backend attendee search, scan, undo, and check-in-stat endpoints. Platform
-administration at `/admin/users` lists users and supports credential updates or
-deletion; the API does not expose role assignment, so the page cannot change
-roles. Frontend role guards only affect navigation and UX; authorization must
-be enforced by the backend on every protected endpoint.
+administration at `/admin/users` lists users, supports credential and role
+updates, deletion, and event suspension/unsuspension with a reason. Frontend
+role guards only affect navigation and UX; authorization must be enforced by
+the backend on every protected endpoint.
 
 On the event page, selecting tickets creates an order through `POST /api/orders`
 and opens its confirmation screen. The screen loads the authoritative order

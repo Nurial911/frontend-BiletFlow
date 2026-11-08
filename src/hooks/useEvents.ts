@@ -6,7 +6,9 @@ import type { Event, TicketType } from "../api/types";
 // Only events attendees should see: published and public.
 // (If the backend leaves these fields out, the event is shown.)
 const isVisible = (e: Event) =>
-  (e.status ?? "PUBLISHED") === "PUBLISHED" && (e.visibilityStatus ?? "PUBLIC") === "PUBLIC";
+  (e.status ?? "PUBLISHED") === "PUBLISHED" &&
+  (e.visibilityStatus ?? "PUBLIC") === "PUBLIC" &&
+  !e.suspended;
 
 const byStartTime = (a: Event, b: Event) =>
   parseDate(a.startTime).getTime() - parseDate(b.startTime).getTime();

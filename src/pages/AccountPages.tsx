@@ -9,7 +9,8 @@ import {
   undoEventCheckIn,
 } from "../api/checkIn";
 import { cancelOrder, getMyOrders, getMyTickets, getTicketQr } from "../api/orders";
-import { deleteUser, getUsers, updateUser, type UpdateUserRequest } from "../api/users";
+import { getEvents, setEventSuspended } from "../api/events";
+import { changeUserRole, deleteUser, getUsers, updateUser, type UpdateUserRequest } from "../api/users";
 import { useAuth } from "../auth/AuthContext";
 import { Button } from "../components/ui/Button";
 import { formatPrice } from "../lib/format";
@@ -286,18 +287,32 @@ export function PlatformAdminPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const users = useQuery({ queryKey: ["admin-users", page], queryFn: () => getUsers(page, PAGE_SIZE) });
+  const events = useQuery({ queryKey: ["admin-events"], queryFn: () => getEvents(0, 100) });
   const remove = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin-users"] }); },
   });
+  const moderation = useMutation({
+    mutationFn: ({ eventId, suspended, reason }: { eventId: number; suspended: boolean; reason?: string }) =>
+      setEventSuspended(eventId, suspended, reason),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+        queryClient.invalidateQueries({ queryKey: ["event"] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-sales-summary"] }),
+      ]);
+    },
+  });
 
   if (users.isLoading) return <Loading />;
-  if (users.error) return <ErrorPanel error={users.error} retry={() => { void users.refetch(); }} />;
+  if (users.error || events.error) return <ErrorPanel error={users.error ?? events.error} retry={() => { void users.refetch(); void events.refetch(); }} />;
 
   return (
     <section>
       <h1 className="text-2xl font-bold">Пользователи платформы</h1>
-      <p className="mt-1 text-sm text-muted">Можно просматривать пользователей, менять email/пароль и удалять аккаунты. Управления ролями API не предоставляет.</p>
+      <p className="mt-1 text-sm text-muted">Управляйте аккаунтами и ролями пользователей, модерируйте мероприятия.</p>
       {(users.data?.content ?? []).length === 0 ? <Empty text="Пользователи не найдены." /> : (
         <div className="mt-4 space-y-3">
           {(users.data?.content ?? []).map((user) => (
@@ -314,6 +329,43 @@ export function PlatformAdminPage() {
       )}
       {remove.error && <ApiErrorMessage error={remove.error} />}
       <Pagination page={page} totalPages={users.data?.totalPages ?? 0} onChange={setPage} />
+      {moderation.error && <ApiErrorMessage error={moderation.error} />}
+      <section className="mt-10">
+        <h2 className="text-xl font-bold">Модерация мероприятий</h2>
+        {events.isLoading ? <Loading /> : (events.data?.content ?? []).length === 0 ? <Empty text="Мероприятия не найдены." /> : (
+          <div className="mt-4 space-y-3">
+            {(events.data?.content ?? []).map((event) => (
+              <article key={event.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+                <div>
+                  <p className="font-semibold">{event.title}</p>
+                  <p className="mt-1 text-xs text-muted">ID {event.id} · {event.status}{event.suspended ? " · Приостановлено" : ""}</p>
+                  {event.suspensionReason && <p className="mt-1 text-sm text-red-700">Причина: {event.suspensionReason}</p>}
+                </div>
+                {event.suspended ? (
+                  <Button
+                    variant="secondary"
+                    disabled={moderation.isPending}
+                    onClick={() => moderation.mutate({ eventId: event.id, suspended: false })}
+                  >
+                    {moderation.isPending && moderation.variables?.eventId === event.id ? "Возобновляем…" : "Возобновить"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    disabled={moderation.isPending}
+                    onClick={() => {
+                      const reason = window.prompt(`Укажите причину приостановки «${event.title}»:`);
+                      if (reason?.trim()) moderation.mutate({ eventId: event.id, suspended: true, reason: reason.trim() });
+                    }}
+                  >
+                    Приостановить
+                  </Button>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -323,6 +375,7 @@ function AdminUserCard({ user, pending, onDelete }: { user: User; pending: boole
   const [editing, setEditing] = useState(false);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState(user.role.replace(/^ROLE_/, ""));
   const [formError, setFormError] = useState("");
   const update = useMutation({
     mutationFn: (request: UpdateUserRequest) => updateUser(user.id, request),
@@ -330,6 +383,15 @@ function AdminUserCard({ user, pending, onDelete }: { user: User; pending: boole
       setEditing(false);
       setPassword("");
       await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+  const updateRole = useMutation({
+    mutationFn: (nextRole: string) => changeUserRole(user.id, nextRole),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["me"] }),
+      ]);
     },
   });
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -364,9 +426,30 @@ function AdminUserCard({ user, pending, onDelete }: { user: User; pending: boole
       </div>
       {editing && (
         <form onSubmit={submit} className="mt-4 space-y-3 border-t pt-4">
+          <label className="block text-sm">Роль
+            <select value={role} onChange={(event) => setRole(event.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2">
+              <option value="USER">Посетитель (USER)</option>
+              <option value="ORGANIZER">Организатор (ORGANIZER)</option>
+              <option value="EVENT_ADMIN">Администратор события (EVENT_ADMIN)</option>
+              <option value="PLATFORM_ADMIN">Администратор платформы (PLATFORM_ADMIN)</option>
+            </select>
+          </label>
+          {role !== user.role.replace(/^ROLE_/, "") && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={updateRole.isPending}
+              onClick={() => {
+                if (window.confirm(`Назначить пользователю ${user.email} роль ${role}?`)) updateRole.mutate(role);
+              }}
+            >
+              {updateRole.isPending ? "Сохраняем роль…" : "Изменить роль"}
+            </Button>
+          )}
           <label className="block text-sm">Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2" /></label>
           <label className="block text-sm">Новый пароль (необязательно)<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2" /></label>
           {(formError || update.error) && <ApiErrorMessage error={formError || update.error} />}
+          {updateRole.error && <ApiErrorMessage error={updateRole.error} />}
           <Button type="submit" disabled={update.isPending}>{update.isPending ? "Сохраняем…" : "Сохранить изменения"}</Button>
         </form>
       )}

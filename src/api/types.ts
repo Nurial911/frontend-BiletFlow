@@ -10,9 +10,84 @@ export interface User {
   createdAt: string;
 }
 
+export interface UpdateTicketTypeRequest {
+  name?: string;
+  description?: string;
+  price?: number;
+  quantity?: number;
+  salesStart?: string;
+  salesEnd?: string;
+  maxPerOrder?: number;
+}
+
 export interface AuthResponse {
   accessToken: string;
   user: User;
+}
+
+export interface TicketTypeSales {
+  ticketTypeId: number;
+  name: string;
+  price: number;
+  hidden: boolean;
+  quantity: number;
+  sold: number;
+  reserved: number;
+  available: number;
+  revenue: number;
+}
+
+export interface DailySales {
+  date: string;
+  paidOrders: number;
+  ticketsSold: number;
+  revenue: number;
+}
+
+export interface EventSales {
+  eventId: number;
+  eventTitle: string;
+  status: EventStatus;
+  suspended: boolean;
+  startTime: string;
+  endTime?: string;
+  capacity?: number;
+  paidOrders: number;
+  pendingOrders: number;
+  cancelledOrders: number;
+  expiredOrders: number;
+  ticketsSold: number;
+  ticketsReserved: number;
+  revenue: number;
+  ticketTypes: TicketTypeSales[];
+  salesByDay: DailySales[];
+}
+
+export interface SalesTotals {
+  events: number;
+  paidOrders: number;
+  pendingOrders: number;
+  ticketsSold: number;
+  ticketsReserved: number;
+  revenue: number;
+}
+
+export interface SalesSummary {
+  events: EventSales[];
+  totals: SalesTotals;
+}
+
+export interface EventOrder {
+  id: number;
+  status: OrderStatus;
+  buyerId: number;
+  buyerEmail: string;
+  totalAmount: number;
+  ticketCount: number;
+  createdAt: string;
+  expiresAt?: string;
+  paidAt?: string;
+  items: OrderItem[];
 }
 
 export interface Venue {
@@ -86,6 +161,9 @@ export interface Event {
   capacity?: number;
   visibilityStatus?: Visibility;
   status?: EventStatus;
+  suspended?: boolean;
+  suspendedAt?: string;
+  suspensionReason?: string;
   organizerId?: number;
   venue?: Venue;
   posterUrl?: string | null;

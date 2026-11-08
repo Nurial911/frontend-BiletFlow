@@ -83,7 +83,11 @@ export default function EventPage() {
             </p>
           )}
 
-          {event.status === "CANCELLED" ? (
+          {event.suspended ? (
+            <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+              Продажа билетов на это мероприятие временно приостановлена.
+            </p>
+          ) : event.status === "CANCELLED" ? (
             <p className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">Событие отменено</p>
           ) : (
             <div className="mt-5 flex max-w-md items-center justify-between rounded-xl bg-surface p-4">

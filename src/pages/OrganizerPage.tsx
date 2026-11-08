@@ -12,7 +12,9 @@ import {
   getTicketTypes,
   getVenues,
   manageEvent,
+  setTicketTypeHidden,
   updateEvent,
+  updateTicketType,
   uploadEventPoster,
   type EventManagementAction,
 } from "../api/events";
@@ -22,6 +24,7 @@ import type {
   Event,
   EventStatus,
   TicketType,
+  UpdateTicketTypeRequest,
   UpdateEventRequest,
   Venue,
   Visibility,
@@ -238,7 +241,6 @@ export function CreateOrganizerEventPage() {
       ]);
     },
   });
-
   if (venues.isLoading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">Загрузка площадок…</p>;
   if (venues.error) {
     return (
@@ -455,6 +457,29 @@ export function OrganizerTicketsPage() {
       await queryClient.invalidateQueries({ queryKey: ["ticket-types", eventId] });
     },
   });
+  const updateMutation = useMutation({
+    mutationFn: ({ ticketTypeId, request }: { ticketTypeId: number; request: UpdateTicketTypeRequest }) =>
+      updateTicketType(ticketTypeId, request),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["ticket-types", eventId] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-sales-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-sales-detail"] }),
+      ]);
+    },
+  });
+  const visibilityMutation = useMutation({
+    mutationFn: ({ ticketTypeId, hidden }: { ticketTypeId: number; hidden: boolean }) =>
+      setTicketTypeHidden(ticketTypeId, hidden),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["ticket-types", eventId] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-sales-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["organizer-sales-detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+      ]);
+    },
+  });
 
   if (!Number.isSafeInteger(eventId) || eventId <= 0) {
     return <AccessMessage title="Некорректный ID события" detail="Проверьте ссылку и выберите событие из списка." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
@@ -510,7 +535,21 @@ export function OrganizerTicketsPage() {
 
       {tickets.length > 0 && (
         <section aria-label="Созданные типы билетов" className="space-y-3">
-          {tickets.map((ticket) => <TicketTypeCard key={ticket.id} ticket={ticket} />)}
+          {tickets.map((ticket) => (
+            <TicketTypeCard
+              key={ticket.id}
+              ticket={ticket}
+              maxQuantity={remaining === null ? null : remaining + ticket.quantity}
+              isPending={updateMutation.isPending || visibilityMutation.isPending}
+              updateError={updateMutation.variables?.ticketTypeId === ticket.id ? updateMutation.error : null}
+              visibilityError={visibilityMutation.variables?.ticketTypeId === ticket.id ? visibilityMutation.error : null}
+              onUpdate={(request, onSuccess) => updateMutation.mutate(
+                { ticketTypeId: ticket.id, request },
+                { onSuccess },
+              )}
+              onToggleHidden={() => visibilityMutation.mutate({ ticketTypeId: ticket.id, hidden: !ticket.hidden })}
+            />
+          ))}
         </section>
       )}
 
@@ -538,30 +577,132 @@ export function OrganizerTicketsPage() {
   );
 }
 
-function TicketTypeCard({ ticket }: { ticket: TicketType }) {
+function TicketTypeCard({
+  ticket,
+  maxQuantity,
+  isPending,
+  updateError,
+  visibilityError,
+  onUpdate,
+  onToggleHidden,
+}: {
+  ticket: TicketType;
+  maxQuantity: number | null;
+  isPending: boolean;
+  updateError: unknown;
+  visibilityError: unknown;
+  onUpdate: (request: UpdateTicketTypeRequest, onSuccess: () => void) => void;
+  onToggleHidden: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
   const saleState = getTicketSaleState(ticket);
   return (
-    <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
-      <div>
-        <h3 className="font-semibold">{ticket.name}</h3>
-        {ticket.description && <p className="mt-1 text-sm text-muted">{ticket.description}</p>}
-        <p className="mt-1 text-sm text-muted">
-          {ticket.price === 0 ? "Бесплатно" : `${ticket.price} ₸`} · Доступно: {ticket.available} из {ticket.quantity}
-        </p>
-        {saleState === "sold-out" && <p className="mt-1 text-sm font-semibold text-red-700">Билеты этого типа распроданы</p>}
-        {saleState === "sales-ended" && (
-          <p className="mt-1 text-sm font-semibold text-amber-800">
-            Продажи завершены{ticket.salesEnd ? ` ${formatTicketSalesEnd(ticket.salesEnd)}` : ""}
+    <article className="rounded-xl border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">{ticket.name}</h3>
+          {ticket.description && <p className="mt-1 text-sm text-muted">{ticket.description}</p>}
+          <p className="mt-1 text-sm text-muted">
+            {ticket.price === 0 ? "Бесплатно" : `${ticket.price} ₸`} · Доступно: {ticket.available} из {ticket.quantity} · Продано: {ticket.sold}
           </p>
-        )}
-        {saleState === "not-started" && ticket.salesStart && (
-          <p className="mt-1 text-sm text-muted">Продажи начнутся {formatTicketSalesEnd(ticket.salesStart)}</p>
-        )}
+          {saleState === "sold-out" && <p className="mt-1 text-sm font-semibold text-red-700">Билеты этого типа распроданы</p>}
+          {saleState === "sales-ended" && (
+            <p className="mt-1 text-sm font-semibold text-amber-800">
+              Продажи завершены{ticket.salesEnd ? ` ${formatTicketSalesEnd(ticket.salesEnd)}` : ""}
+            </p>
+          )}
+          {saleState === "not-started" && ticket.salesStart && (
+            <p className="mt-1 text-sm text-muted">Продажи начнутся {formatTicketSalesEnd(ticket.salesStart)}</p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${ticket.hidden ? "bg-gray-100 text-gray-700" : "bg-green-100 text-green-800"}`}>
+            {ticket.hidden ? "Скрыт" : "Активен"}
+          </span>
+          <Button variant="secondary" disabled={isPending} onClick={() => setEditing((current) => !current)}>
+            {editing ? "Закрыть" : "Изменить"}
+          </Button>
+          <Button variant="secondary" disabled={isPending} onClick={onToggleHidden}>
+            {ticket.hidden ? "Показать" : "Скрыть"}
+          </Button>
+        </div>
       </div>
-      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${ticket.hidden ? "bg-gray-100 text-gray-700" : "bg-green-100 text-green-800"}`}>
-        {ticket.hidden ? "Скрыт" : "Активен"}
-      </span>
+      {editing && (
+        <TicketTypeEditForm
+          ticket={ticket}
+          maxQuantity={maxQuantity}
+          isPending={isPending}
+          error={updateError}
+          onSubmit={(request) => onUpdate(request, () => setEditing(false))}
+        />
+      )}
+      {!editing && updateError != null && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {updateError instanceof Error ? updateError.message : "Не удалось обновить тип билета."}
+        </p>
+      )}
+      {visibilityError != null && <p role="alert" className="mt-3 text-sm text-red-700">{visibilityError instanceof Error ? visibilityError.message : "Не удалось изменить видимость билета."}</p>}
     </article>
+  );
+}
+
+function TicketTypeEditForm({
+  ticket,
+  maxQuantity,
+  isPending,
+  error,
+  onSubmit,
+}: {
+  ticket: TicketType;
+  maxQuantity: number | null;
+  isPending: boolean;
+  error: unknown;
+  onSubmit: (request: UpdateTicketTypeRequest) => void;
+}) {
+  const [validationError, setValidationError] = useState("");
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setValidationError("");
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const description = String(form.get("description") ?? "").trim();
+    const priceValue = String(form.get("price") ?? "");
+    const price = Number(priceValue);
+    const quantity = Number(form.get("quantity"));
+    const salesStart = String(form.get("salesStart") ?? "");
+    const salesEnd = String(form.get("salesEnd") ?? "");
+    const maxPerOrder = Number(form.get("maxPerOrder"));
+    if (!name) return setValidationError("Укажите название типа билета.");
+    if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(priceValue)) {
+      return setValidationError("Цена должна быть неотрицательной и содержать не более двух знаков после запятой.");
+    }
+    if (!Number.isSafeInteger(quantity) || quantity < ticket.sold || (maxQuantity !== null && quantity > maxQuantity)) {
+      return setValidationError(`Количество должно быть не меньше уже проданных билетов (${ticket.sold}) и не больше ${maxQuantity ?? "допустимого лимита"}.`);
+    }
+    if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || maxPerOrder > quantity) {
+      return setValidationError("Лимит на заказ должен быть положительным числом и не превышать количество билетов.");
+    }
+    if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
+      return setValidationError("Начало продаж должно быть раньше окончания.");
+    }
+    const request: UpdateTicketTypeRequest = { name, description, price, quantity, maxPerOrder };
+    if (salesStart) request.salesStart = toApiLocalDateTime(salesStart);
+    if (salesEnd) request.salesEnd = toApiLocalDateTime(salesEnd);
+    onSubmit(request);
+  };
+  return (
+    <form onSubmit={submit} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
+      <FormField label="Название"><input name="name" required maxLength={100} defaultValue={ticket.name} className={fieldClass} /></FormField>
+      <FormField label="Описание"><textarea name="description" rows={2} defaultValue={ticket.description ?? ""} className={fieldClass} /></FormField>
+      <FormField label="Цена, ₸"><input name="price" type="number" min="0" step="0.01" required defaultValue={ticket.price} className={fieldClass} /></FormField>
+      <FormField label="Количество (не меньше проданного)"><input name="quantity" type="number" min={ticket.sold} max={maxQuantity ?? undefined} step="1" required defaultValue={ticket.quantity} className={fieldClass} /></FormField>
+      <FormField label="Начало продаж"><input name="salesStart" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesStart)} className={fieldClass} /></FormField>
+      <FormField label="Окончание продаж"><input name="salesEnd" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesEnd)} className={fieldClass} /></FormField>
+      <FormField label="Максимум в одном заказе"><input name="maxPerOrder" type="number" min="1" max={ticket.quantity} step="1" required defaultValue={ticket.maxPerOrder ?? 10} className={fieldClass} /></FormField>
+      <p className="text-xs text-muted sm:col-span-2">Пустые даты отправляются как отсутствие изменения; очистка даты зависит от поддержки backend.</p>
+      {(validationError || error != null) && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{validationError || (error instanceof Error ? error.message : "Не удалось обновить тип билета.")}</p>}
+      <Button type="submit" disabled={isPending} className="sm:col-span-2">{isPending ? "Сохраняем…" : "Сохранить тип билета"}</Button>
+    </form>
   );
 }
 

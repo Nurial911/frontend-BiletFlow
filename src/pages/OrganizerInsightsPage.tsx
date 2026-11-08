@@ -6,128 +6,183 @@ import {
   getEventStaff,
   removeEventStaff,
 } from "../api/checkIn";
-import { getOrganizerEvents, getOrganizerProfile, getTicketTypes } from "../api/events";
+import { getEventOrders, getEventSales, getOrganizerSales } from "../api/sales";
 import { Button, buttonClass } from "../components/ui/Button";
-import { formatPrice, formatShortDate } from "../lib/format";
-import { getEventTicketSaleState } from "../lib/ticketSales";
-import type { Event, EventStaff, TicketType } from "../api/types";
-
-interface EventSales {
-  event: Event;
-  ticketTypes: TicketType[];
-}
+import { formatLongDate, formatPrice, formatShortDate } from "../lib/format";
+import type { EventSales, EventStaff } from "../api/types";
 
 export function OrganizerSalesPage() {
-  const profile = useQuery({ queryKey: ["organizer-profile"], queryFn: getOrganizerProfile });
-  const events = useQuery({
-    queryKey: ["organizer-events", profile.data?.userId],
-    queryFn: () => getOrganizerEvents(profile.data!.userId),
-    enabled: !!profile.data?.userId,
-  });
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [orderPage, setOrderPage] = useState(0);
+  const [orderStatus, setOrderStatus] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [orderQuery, setOrderQuery] = useState("");
   const sales = useQuery({
-    queryKey: ["organizer-sales", profile.data?.userId],
-    enabled: !!profile.data?.userId && !!events.data,
-    queryFn: async () => {
-      const eventList = events.data?.content ?? [];
-      return Promise.all(eventList.map(async (event) => ({
-        event,
-        ticketTypes: await getTicketTypes(event.id),
-      })));
-    },
+    queryKey: ["organizer-sales-summary"],
+    queryFn: () => getOrganizerSales(),
+  });
+  const eventSales = useQuery({
+    queryKey: ["organizer-sales-detail", selectedEventId],
+    queryFn: () => getEventSales(selectedEventId!),
+    enabled: selectedEventId !== null,
+  });
+  const eventOrders = useQuery({
+    queryKey: ["organizer-event-orders", selectedEventId, orderPage, orderStatus, orderQuery],
+    queryFn: () => getEventOrders(selectedEventId!, {
+      page: orderPage,
+      size: 20,
+      status: orderStatus || undefined,
+      query: orderQuery,
+    }),
+    enabled: selectedEventId !== null,
   });
   const retry = () => {
-    void profile.refetch();
-    void events.refetch();
     void sales.refetch();
+    if (selectedEventId !== null) {
+      void eventSales.refetch();
+      void eventOrders.refetch();
+    }
   };
 
-  if (profile.isLoading || events.isLoading || sales.isLoading) return <LoadingState />;
-  if (profile.error || events.error || sales.error) {
-    return <ErrorState error={profile.error ?? events.error ?? sales.error} onRetry={retry} />;
-  }
+  if (sales.isLoading) return <LoadingState />;
+  if (sales.error) return <ErrorState error={sales.error} onRetry={retry} />;
+  if (!sales.data) return <ErrorState error={new Error("Backend не вернул сводку продаж.")} onRetry={retry} />;
 
-  const rows = sales.data ?? [];
-  const totals = rows.reduce((acc, row) => {
-    for (const ticket of row.ticketTypes) {
-      acc.sold += ticket.sold;
-      acc.available += ticket.available;
-      acc.estimatedGross += ticket.sold * ticket.price;
-    }
-    return acc;
-  }, { sold: 0, available: 0, estimatedGross: 0 });
+  const summary = sales.data;
+  const rows = summary?.events ?? [];
+  const submitOrderSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOrderPage(0);
+    setOrderQuery(searchInput.trim());
+  };
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-xl font-bold">Продажи мероприятий</h2>
-        <p className="mt-1 text-sm text-muted">
-          Сводка рассчитана по счётчикам типов билетов. Сумма — оценка по цене билета, не бухгалтерская выручка.
-        </p>
+        <p className="mt-1 text-sm text-muted">Статистика и выручка загружены из backend.</p>
       </div>
       {rows.length === 0 ? (
         <p className="rounded-xl bg-surface p-6 text-center text-sm text-muted">У вас пока нет мероприятий.</p>
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Metric label="Продано билетов" value={totals.sold.toLocaleString("ru-RU")} />
-            <Metric label="Осталось билетов" value={totals.available.toLocaleString("ru-RU")} />
-            <Metric label="Оценка суммы продаж" value={formatPrice(totals.estimatedGross)} />
+            <Metric label="Оплачено заказов" value={summary.totals.paidOrders.toLocaleString("ru-RU")} />
+            <Metric label="Продано билетов" value={summary.totals.ticketsSold.toLocaleString("ru-RU")} />
+            <Metric label="Выручка" value={formatPrice(summary.totals.revenue)} />
           </div>
-          {rows.map((row) => <EventSalesCard key={row.event.id} row={row} />)}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Metric label="Ожидают оплаты" value={summary.totals.pendingOrders.toLocaleString("ru-RU")} />
+            <Metric label="Зарезервировано билетов" value={summary.totals.ticketsReserved.toLocaleString("ru-RU")} />
+          </div>
+          {rows.map((row) => (
+            <EventSalesCard
+              key={row.eventId}
+              row={row}
+              expanded={selectedEventId === row.eventId}
+              onToggle={() => {
+                setSelectedEventId((current) => current === row.eventId ? null : row.eventId);
+                setOrderPage(0);
+                setOrderStatus("");
+                setOrderQuery("");
+                setSearchInput("");
+              }}
+            />
+          ))}
+          {selectedEventId !== null && (
+            <section className="rounded-xl border p-4">
+              <h3 className="text-lg font-semibold">Динамика и заказы</h3>
+              {eventSales.isLoading ? <LoadingState /> : eventSales.error ? (
+                <ErrorState error={eventSales.error} onRetry={() => { void eventSales.refetch(); }} />
+              ) : eventSales.data ? (
+                <SalesDetail sales={eventSales.data} />
+              ) : null}
+              <div className="mt-6 border-t pt-4">
+                <h4 className="font-semibold">Заказы мероприятия</h4>
+                <form onSubmit={submitOrderSearch} className="mt-3 grid gap-2 sm:grid-cols-[1fr_180px_auto]">
+                  <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Поиск по email или номеру заказа" className="rounded-lg border px-3 py-2 text-sm" />
+                  <select value={orderStatus} onChange={(event) => { setOrderStatus(event.target.value); setOrderPage(0); }} className="rounded-lg border px-3 py-2 text-sm">
+                    <option value="">Все статусы</option>
+                    <option value="PENDING">Ожидает оплаты</option>
+                    <option value="PAID">Оплачен</option>
+                    <option value="CANCELLED">Отменён</option>
+                    <option value="EXPIRED">Истёк</option>
+                  </select>
+                  <Button type="submit">Найти</Button>
+                </form>
+                {eventOrders.isLoading ? <LoadingState /> : eventOrders.error ? (
+                  <ErrorState error={eventOrders.error} onRetry={() => { void eventOrders.refetch(); }} />
+                ) : (eventOrders.data?.content ?? []).length === 0 ? (
+                  <p className="mt-3 text-sm text-muted">Заказы не найдены.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {(eventOrders.data?.content ?? []).map((order) => (
+                      <article key={order.id} className="rounded-lg bg-surface p-3 text-sm">
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <strong>Заказ №{order.id} · {order.buyerEmail}</strong>
+                          <span>{formatPrice(order.totalAmount)} · {order.status}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted">
+                          {order.ticketCount} бил. · Создан {new Date(order.createdAt).toLocaleString("ru-RU")}
+                          {order.paidAt ? ` · Оплачен ${new Date(order.paidAt).toLocaleString("ru-RU")}` : ""}
+                        </p>
+                        <ul className="mt-2 text-xs">
+                          {order.items.map((item) => <li key={item.ticketTypeId}>{item.ticketTypeName} × {item.quantity}</li>)}
+                        </ul>
+                      </article>
+                    ))}
+                    <OrdersPagination
+                      page={orderPage}
+                      totalPages={eventOrders.data?.totalPages ?? 0}
+                      onChange={setOrderPage}
+                    />
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function EventSalesCard({ row }: { row: EventSales }) {
-  const sold = row.ticketTypes.reduce((sum, ticket) => sum + ticket.sold, 0);
-  const available = row.ticketTypes.reduce((sum, ticket) => sum + ticket.available, 0);
-  const gross = row.ticketTypes.reduce((sum, ticket) => sum + ticket.sold * ticket.price, 0);
-  const saleState = getEventTicketSaleState(row.ticketTypes);
-
+function EventSalesCard({ row, expanded, onToggle }: { row: EventSales; expanded: boolean; onToggle: () => void }) {
   return (
     <article className="rounded-xl border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="font-semibold">{row.event.title}</h3>
-          <p className="mt-1 text-sm text-muted">{formatShortDate(row.event.startTime)}</p>
+          <h3 className="font-semibold">{row.eventTitle}</h3>
+          <p className="mt-1 text-sm text-muted">{formatShortDate(row.startTime)} · {row.status}{row.suspended ? " · Приостановлено" : ""}</p>
         </div>
-        <Link to={`/organizer/events/${row.event.id}/staff`} className={buttonClass("secondary")}>
-          Сотрудники события
-        </Link>
+        <div className="flex gap-2">
+          <Link to={`/organizer/events/${row.eventId}/staff`} className={buttonClass("secondary")}>Сотрудники</Link>
+          <Button variant="secondary" onClick={onToggle}>{expanded ? "Скрыть детали" : "Заказы и детали"}</Button>
+        </div>
       </div>
-      {saleState === "sold-out" && (
-        <p role="status" className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">
-          Все доступные билеты распроданы.
-        </p>
-      )}
-      {saleState === "sales-ended" && (
-        <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-900">
-          Дедлайн покупки прошёл: продажи билетов завершены.
-        </p>
-      )}
       <div className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
-        <p>Продано: <strong>{sold}</strong></p>
-        <p>Осталось: <strong>{available}</strong></p>
-        <p>Оценка суммы: <strong>{formatPrice(gross)}</strong></p>
+        <p>Оплаченные заказы: <strong>{row.paidOrders}</strong></p>
+        <p>Ожидают оплаты: <strong>{row.pendingOrders}</strong></p>
+        <p>Отменены / истекли: <strong>{row.cancelledOrders + row.expiredOrders}</strong></p>
+        <p>Продано билетов: <strong>{row.ticketsSold}</strong></p>
+        <p>Зарезервировано: <strong>{row.ticketsReserved}</strong></p>
+        <p>Выручка: <strong>{formatPrice(row.revenue)}</strong></p>
       </div>
-      {row.ticketTypes.length === 0 ? (
-        <p className="mt-3 text-sm text-muted">Типы билетов не добавлены.</p>
-      ) : (
+      {row.ticketTypes.length === 0 ? <p className="mt-3 text-sm text-muted">Типы билетов не добавлены.</p> : (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="border-b text-xs text-muted">
-              <tr><th className="py-2 pr-3">Тип билета</th><th className="py-2 pr-3">Цена</th><th className="py-2 pr-3">Продано</th><th className="py-2 pr-3">Остаток</th><th className="py-2">Сумма по счётчику</th></tr>
+              <tr><th className="py-2 pr-3">Тип билета</th><th className="py-2 pr-3">Цена</th><th className="py-2 pr-3">Продано</th><th className="py-2 pr-3">Резерв</th><th className="py-2 pr-3">Остаток</th><th className="py-2">Выручка</th></tr>
             </thead>
             <tbody>
               {row.ticketTypes.map((ticket) => (
-                <tr key={ticket.id} className="border-b last:border-0">
+                <tr key={ticket.ticketTypeId} className="border-b last:border-0">
                   <td className="py-2 pr-3">{ticket.name}</td>
                   <td className="py-2 pr-3">{ticket.price === 0 ? "Бесплатно" : formatPrice(ticket.price)}</td>
                   <td className="py-2 pr-3">{ticket.sold}</td>
+                  <td className="py-2 pr-3">{ticket.reserved}</td>
                   <td className="py-2 pr-3">{ticket.available}</td>
-                  <td className="py-2">{formatPrice(ticket.sold * ticket.price)}</td>
+                  <td className="py-2">{formatPrice(ticket.revenue)}</td>
                 </tr>
               ))}
             </tbody>
@@ -135,6 +190,45 @@ function EventSalesCard({ row }: { row: EventSales }) {
         </div>
       )}
     </article>
+  );
+}
+
+function SalesDetail({ sales }: { sales: EventSales }) {
+  const maxDailyRevenue = Math.max(0, ...sales.salesByDay.map((day) => day.revenue));
+  return (
+    <div className="mt-4">
+      <div className="grid gap-2 sm:grid-cols-4">
+        <Metric label="Выручка" value={formatPrice(sales.revenue)} />
+        <Metric label="Оплачено заказов" value={String(sales.paidOrders)} />
+        <Metric label="Отменено заказов" value={String(sales.cancelledOrders)} />
+        <Metric label="Истекло заказов" value={String(sales.expiredOrders)} />
+      </div>
+      <h4 className="mt-5 font-semibold">Продажи по дням</h4>
+      {sales.salesByDay.length === 0 ? <p className="mt-2 text-sm text-muted">Данных о продажах пока нет.</p> : (
+        <div className="mt-2 space-y-2">
+          {sales.salesByDay.map((day) => (
+            <div key={day.date} className="grid grid-cols-[90px_1fr_auto] items-center gap-3 text-xs">
+              <span>{formatLongDate(day.date)}</span>
+              <div className="h-3 overflow-hidden rounded bg-surface">
+                <div className="h-full rounded bg-black" style={{ width: `${maxDailyRevenue > 0 ? Math.max(day.revenue / maxDailyRevenue * 100, day.revenue > 0 ? 2 : 0) : 0}%` }} />
+              </div>
+              <span className="whitespace-nowrap">{formatPrice(day.revenue)} · {day.ticketsSold} бил.</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrdersPagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="mt-3 flex items-center justify-center gap-3">
+      <Button variant="secondary" disabled={page === 0} onClick={() => onChange(page - 1)}>Назад</Button>
+      <span className="text-sm">{page + 1} / {totalPages}</span>
+      <Button variant="secondary" disabled={page + 1 >= totalPages} onClick={() => onChange(page + 1)}>Далее</Button>
+    </div>
   );
 }
 

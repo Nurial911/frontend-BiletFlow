@@ -6,6 +6,9 @@ export interface UpdateUserRequest {
   password?: string;
 }
 
+export const changeUserRole = (userId: number, role: string) =>
+  api<User>(`/api/users/${userId}/role`, { method: "PUT", body: { role } });
+
 export const getUsers = (page = 0, size = 20) =>
   api<Page<User>>(`/api/users?page=${page}&size=${size}`);
 
