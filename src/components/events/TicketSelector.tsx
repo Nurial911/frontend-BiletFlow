@@ -1,19 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { TicketType } from "../../api/types";
-import type { OrderItemInput } from "../../api/orders";
+import { quoteOrder, type OrderItemInput } from "../../api/orders";
+import { useAuth } from "../../auth/AuthContext";
 import { formatPrice } from "../../lib/format";
 import { Button } from "../ui/Button";
 
 interface Props {
+  eventId: number;
   types: TicketType[];
-  onContinue: (items: OrderItemInput[]) => void;
+  onContinue: (items: OrderItemInput[], promoCode?: string) => void;
   busy?: boolean;
+  initialPromoCode?: string; // filled in when the page was opened from a Campaign QR
 }
 
-// List of ticket types with − / + buttons and a total at the bottom.
-export function TicketSelector({ types, onContinue, busy = false }: Props) {
+// List of ticket types with − / + buttons, a promo code box and a total at the bottom.
+export function TicketSelector({ eventId, types, onContinue, busy = false, initialPromoCode }: Props) {
+  const { isLoggedIn } = useAuth();
   // How many of each ticket type is chosen: { 4: 2, 5: 1 } means 2 of type 4 and 1 of type 5
   const [counts, setCounts] = useState<Record<number, number>>({});
+  // What the user is typing, and the code they pressed "Применить" for
+  const [promoInput, setPromoInput] = useState("");
+  const [promoCode, setPromoCode] = useState<string>();
+
+  // A Campaign QR code arrives a moment after the page loads, so copy it in when it does
+  useEffect(() => {
+    if (initialPromoCode) {
+      setPromoInput(initialPromoCode);
+      setPromoCode(initialPromoCode);
+    }
+  }, [initialPromoCode]);
 
   // Can't pick more than what's left, or more than the per-order limit (10 if none is set)
   const maxFor = (t: TicketType) =>
@@ -30,6 +46,26 @@ export function TicketSelector({ types, onContinue, busy = false }: Props) {
     .map((t) => ({ ticketTypeId: t.id, quantity: counts[t.id] }));
   const totalCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const total = types.reduce((sum, t) => sum + (counts[t.id] ?? 0) * t.price, 0);
+
+
+  // Ask the server what the order costs with the code. Only the server knows the discount.
+  const quote = useQuery({
+    queryKey: ["order-quote", eventId, items, promoCode],
+    queryFn: () => quoteOrder(eventId, items, promoCode),
+    enabled: !!promoCode && totalCount > 0 && isLoggedIn,
+    retry: false,
+  });
+  // Send the code with the order only if the server accepted it
+  const acceptedPromo = quote.data ? promoCode : undefined;
+
+  const applyPromo = () => {
+    const code = promoInput.trim();
+    setPromoCode(code || undefined);
+  };
+  const removePromo = () => {
+    setPromoInput("");
+    setPromoCode(undefined);
+  };
 
   return (
     <div className="mt-2 rounded-xl border">
@@ -72,13 +108,50 @@ export function TicketSelector({ types, onContinue, busy = false }: Props) {
           );
         })}
       </ul>
+            <div className="border-t p-4">
+        <label htmlFor="promo" className="text-sm font-medium">Промокод</label>
+        <div className="mt-1 flex flex-wrap gap-2">
+          <input
+            id="promo"
+            value={promoInput}
+            onChange={(e) => setPromoInput(e.target.value)}
+            maxLength={20}
+            placeholder="Например, SPRING10"
+            className="min-w-40 flex-1 rounded-lg border px-3 py-2 text-sm uppercase"
+          />
+          <Button variant="secondary" onClick={applyPromo} disabled={!promoInput.trim()}>Применить</Button>
+          {promoCode && <Button variant="secondary" onClick={removePromo}>Убрать</Button>}
+        </div>
+        {promoCode && !isLoggedIn && (
+          <p className="mt-2 text-xs text-muted">Войдите в аккаунт, чтобы применить промокод.</p>
+        )}
+        {promoCode && isLoggedIn && totalCount === 0 && (
+          <p className="mt-2 text-xs text-muted">Выберите билеты, чтобы увидеть скидку.</p>
+        )}
+        {quote.error && (
+          <p role="alert" className="mt-2 text-sm text-red-700">
+            {quote.error instanceof Error ? quote.error.message : "Промокод не подходит."}
+          </p>
+        )}
+      </div>
 
       <div className="flex items-center justify-between gap-4 border-t bg-surface p-4">
         <div>
           <p className="text-xs text-muted">Билетов: {totalCount}</p>
-          <p className="text-lg font-bold">Итого: {formatPrice(total)}</p>
+          {quote.data && quote.data.discountAmount > 0 ? (
+            <>
+              <p className="text-xs text-muted line-through">{formatPrice(quote.data.subtotalAmount)}</p>
+              <p className="text-xs text-green-700">Скидка: −{formatPrice(quote.data.discountAmount)}</p>
+              <p className="text-lg font-bold">Итого: {formatPrice(quote.data.totalAmount)}</p>
+            </>
+          ) : (
+            <p className="text-lg font-bold">Итого: {formatPrice(total)}</p>
+          )}
         </div>
-        <Button onClick={() => onContinue(items)} disabled={totalCount === 0 || busy}>
+        <Button
+          onClick={() => onContinue(items, acceptedPromo)}
+          disabled={totalCount === 0 || busy || quote.isFetching || !!quote.error}
+        >
           {busy ? "Создаём заказ…" : "Оформить заказ"}
         </Button>
       </div>

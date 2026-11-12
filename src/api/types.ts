@@ -209,7 +209,11 @@ export interface Order {
   eventId: number;
   eventTitle: string;
   status: OrderStatus;
+  attendeeName?: string;      
+  subtotalAmount: number;      
+  discountAmount: number;     
   totalAmount: number;
+  promoCode?: string | null;  
   createdAt: string;
   expiresAt?: string;
   paidAt?: string;
@@ -228,6 +232,7 @@ export interface Ticket {
   ticketTypeId: number;
   ticketTypeName: string;
   attendeeEmail: string;
+  attendeeName?: string;
   usedAt?: string;
 }
 
@@ -250,4 +255,19 @@ export interface EventStaff {
   userId: number;
   email: string;
   assignedAt: string;
+}
+
+export interface OrderQuote {
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  promoCode?: string | null;
+}
+
+export interface PromoPreview {
+  code: string;
+  discountType: "PERCENT" | "FIXED";
+  discountValue: number;
+  validUntil?: string;
+  ticketTypeIds: number[];
 }

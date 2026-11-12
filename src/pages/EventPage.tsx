@@ -1,7 +1,7 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
-import { createOrder, type OrderItemInput } from "../api/orders";
+import { createOrder, previewPromo, type OrderItemInput } from "../api/orders";
 import { useAuth } from "../auth/AuthContext";
 import { minPrice, useEvent, useTicketTypes } from "../hooks/useEvents";
 import { Button } from "../components/ui/Button";
@@ -17,8 +17,18 @@ export default function EventPage() {
   const { data: event, isLoading, error, refetch } = useEvent(id);
   const { data: types, isLoading: typesLoading } = useTicketTypes(id);
   const { isLoggedIn, openLogin } = useAuth();
+    // A Campaign QR opens /events/{id}?promo=<token>. Ask the server which code that token means.
+  const [searchParams] = useSearchParams();
+  const promoToken = searchParams.get("promo");
+  const campaignPromo = useQuery({
+    queryKey: ["promo-preview", id, promoToken],
+    queryFn: () => previewPromo(id, { token: promoToken! }),
+    enabled: !!promoToken,
+    retry: false,
+  });
   const orderMutation = useMutation({
-    mutationFn: (items: OrderItemInput[]) => createOrder(id, items),
+    mutationFn: ({ items, promoCode }: { items: OrderItemInput[]; promoCode?: string }) =>
+      createOrder(id, items, promoCode),
     onSuccess: (order) => navigate(`/orders/${order.id}`),
   });
 
@@ -46,9 +56,9 @@ export default function EventPage() {
     if (!isLoggedIn) return openLogin();
     document.getElementById("tickets")?.scrollIntoView({ behavior: "smooth" });
   };
-  const onContinue = (items: OrderItemInput[]) => {
+  const onContinue = (items: OrderItemInput[], promoCode?: string) => {
     if (!isLoggedIn) return openLogin();
-    orderMutation.mutate(items);
+    orderMutation.mutate({ items, promoCode });
   };
 
   return (
@@ -136,7 +146,23 @@ export default function EventPage() {
               {orderMutation.error instanceof Error ? orderMutation.error.message : "Не удалось создать заказ."}
             </p>
           )}
-          <TicketSelector types={visibleTypes} onContinue={onContinue} busy={orderMutation.isPending} />
+                    {campaignPromo.data && (
+            <p className="mt-3 rounded-md bg-green-50 p-3 text-sm text-green-800">
+              Промокод {campaignPromo.data.code} из QR-кода уже применён.
+            </p>
+          )}
+          {campaignPromo.error && (
+            <p role="alert" className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+              {campaignPromo.error instanceof Error ? campaignPromo.error.message : "Промокод из QR-кода не подходит."}
+            </p>
+          )}
+          <TicketSelector
+            eventId={id}
+            types={visibleTypes}
+            onContinue={onContinue}
+            busy={orderMutation.isPending}
+            initialPromoCode={campaignPromo.data?.code}
+          />
         </section>
       )}
     </article>
