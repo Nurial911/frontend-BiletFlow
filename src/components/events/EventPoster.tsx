@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import { getEventPoster } from "../../api/events";
+import { useLanguage } from "../../i18n/LanguageContext";
 
 export function EventPoster({
   posterUrl,
   authenticated = false,
   className,
-  alt = "Постер события",
+  alt,
 }: {
   posterUrl?: string | null;
   authenticated?: boolean;
   className: string;
   alt?: string;
 }) {
+  const { t } = useLanguage();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -50,12 +52,12 @@ export function EventPoster({
       {imageUrl && !failed ? (
         <img
           src={imageUrl}
-          alt={alt}
+          alt={alt ?? t("eventPoster")}
           className="absolute inset-0 h-full w-full object-cover"
           onError={() => setFailed(true)}
         />
       ) : (
-        <span className="px-3 text-sm">{failed ? "Не удалось загрузить постер" : "Постер"}</span>
+        <span className="px-3 text-sm">{failed ? t("posterFailed") : t("poster")}</span>
       )}
     </div>
   );

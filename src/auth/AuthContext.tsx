@@ -39,7 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearToken();
     setToken(null);
-    queryClient.removeQueries({ queryKey: ["me"] });
+    // Drop private data when switching accounts, including pending requests.
+    void queryClient.cancelQueries();
+    queryClient.clear();
   }, [queryClient]);
 
   // An old or expired token: forget it.
@@ -48,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [me.error, logout]);
 
   const finishAuth = (res: { accessToken: string; user: User }) => {
+    queryClient.clear();
     saveToken(res.accessToken);
     queryClient.setQueryData(["me", res.accessToken], res.user);
     setToken(res.accessToken);

@@ -3,6 +3,7 @@
 // every place in the app that needs updating.
 
 export interface User {
+  fullName?: string;
   id: number;
   email: string;
   role: string;
@@ -45,6 +46,10 @@ export interface DailySales {
 }
 
 export interface EventSales {
+  discounts: number;
+  netRevenue: number;
+  processingFees: number;
+  estimatedPayout: number;
   eventId: number;
   eventTitle: string;
   status: EventStatus;
@@ -64,6 +69,10 @@ export interface EventSales {
 }
 
 export interface SalesTotals {
+  discounts: number;
+  netRevenue: number;
+  processingFees: number;
+  estimatedPayout: number;
   events: number;
   paidOrders: number;
   pendingOrders: number;
@@ -78,6 +87,7 @@ export interface SalesSummary {
 }
 
 export interface EventOrder {
+  attendeeName?: string;
   id: number;
   status: OrderStatus;
   buyerId: number;
@@ -150,6 +160,7 @@ export interface UpdateEventRequest {
 }
 
 export interface Event {
+  paidSalesActive?: boolean;
   id: number;
   title: string;
   description?: string;
@@ -205,6 +216,10 @@ export interface OrderItem {
 }
 
 export interface Order {
+  attendeeName?: string;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  promoCode?: string | null;
   id: number;
   eventId: number;
   eventTitle: string;
@@ -219,6 +234,7 @@ export interface Order {
 export type TicketStatus = "VALID" | "USED" | "CANCELLED";
 
 export interface Ticket {
+  attendeeName?: string;
   id: number;
   code: string;
   status: TicketStatus;

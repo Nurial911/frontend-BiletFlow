@@ -8,10 +8,21 @@ const BACKEND_URL = "https://biletflow.duckdns.org";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: { manualChunks: { translations: ["./src/i18n/messages.json"] } },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: BACKEND_URL, changeOrigin: true },
+      "/api": {
+        target: BACKEND_URL,
+        changeOrigin: true,
+        // Match Origin to the rewritten Host on the server-to-server hop.
+        // The browser still calls its own origin through Vite.
+        headers: { Origin: BACKEND_URL },
+      },
     },
   },
 });

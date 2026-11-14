@@ -1,10 +1,13 @@
 import { useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
 import { usePublicEvents } from "../hooks/useEvents";
 import { EventCard, EventCardSkeleton } from "../components/events/EventCard";
 import { HeroBanner } from "../components/events/HeroBanner";
 import { DateStrip } from "../components/events/DateStrip";
 import { ErrorMessage } from "../components/ui/ErrorMessage";
 import { categoryLabel, dayKey, parseDate } from "../lib/format";
+import { useLanguage } from "../i18n/LanguageContext";
+import { cities, venueCity } from "../lib/cities";
 
 // Home page = the "event search" wireframe.
 // Filters live in the URL (?q=…&category=…&date=…) so links can be shared
@@ -12,11 +15,16 @@ import { categoryLabel, dayKey, parseDate } from "../lib/format";
 export default function HomePage() {
   const { data: events, isLoading, error, refetch } = usePublicEvents();
   const [params, setParams] = useSearchParams();
+  const { t, locale } = useLanguage();
+  const promo = params.get("promo");
+  useEffect(() => { if (promo) sessionStorage.setItem("bf_promo", promo); }, [promo]);
 
   const q = (params.get("q") ?? "").trim().toLowerCase();
   const category = params.get("category");
   const date = params.get("date");
-  const hasFilters = !!(q || category || date);
+  const cityParam = params.get("city");
+  const city = cityParam === "unknown" || cities.some(item => item.id === cityParam) ? cityParam : null;
+  const hasFilters = !!(q || category || date || city);
 
   const setDate = (day: string | null) => {
     const next = new URLSearchParams(params);
@@ -34,14 +42,15 @@ export default function HomePage() {
     (e) =>
       (!q || e.title.toLowerCase().includes(q) || (e.venue?.name ?? "").toLowerCase().includes(q)) &&
       (!category || e.category === category) &&
+      (!city || (city === "unknown" ? venueCity(e.venue) === null : venueCity(e.venue) === city)) &&
       (!date || dayKey(parseDate(e.startTime)) === date),
   );
 
   const heading = q
-    ? `Результаты поиска «${params.get("q")}»`
+    ? t("searchResults", { query: params.get("q") ?? "" })
     : category
-      ? categoryLabel(category)
-      : "Популярные события";
+      ? categoryLabel(category, locale)
+      : t("popular");
 
   return (
     <>
@@ -62,9 +71,10 @@ export default function HomePage() {
 
       {!isLoading && !error && shown.length === 0 && (
         <p className="rounded-xl bg-surface p-6 text-center text-sm text-muted">
-          {hasFilters ? "Ничего не найдено. Попробуйте другую дату или запрос." : "Пока нет опубликованных событий."}
+          {hasFilters ? t("noResults") : t("noEvents")}
         </p>
       )}
+      {hasFilters && <button type="button" onClick={() => { const next = new URLSearchParams(params); for (const key of ["q", "category", "date", "city"]) next.delete(key); setParams(next); }} className="mb-4 mt-3 text-sm underline">{t("resetFilters")}</button>}
 
       {shown.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

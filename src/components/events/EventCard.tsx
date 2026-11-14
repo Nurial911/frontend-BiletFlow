@@ -3,9 +3,13 @@ import type { Event } from "../../api/types";
 import { minPrice, useTicketTypes } from "../../hooks/useEvents";
 import { categoryLabel, formatPrice, formatShortDate } from "../../lib/format";
 import { EventPoster } from "./EventPoster";
+import { useLanguage } from "../../i18n/LanguageContext";
+import { cityLabel, venueCity } from "../../lib/cities";
 
 // One card in the "Популярные события" grid.
 export function EventCard({ event }: { event: Event }) {
+  const { t, locale, language } = useLanguage();
+  const city = venueCity(event.venue);
   // The event has no price field yet, so each card asks for its ticket types.
   // When the backend adds `minPrice` to events, delete these two lines.
   const { data: types } = useTicketTypes(event.id);
@@ -19,24 +23,25 @@ export function EventCard({ event }: { event: Event }) {
     >
       <EventPoster posterUrl={event.posterUrl} className="aspect-[4/3]" />
       <div className="flex flex-1 flex-col p-3">
-        <p className="text-[11px] font-semibold uppercase text-muted">{categoryLabel(event.category)}</p>
+        <p className="text-[11px] font-semibold uppercase text-muted">{categoryLabel(event.category, locale)}</p>
         <h3 className="mt-0.5 font-semibold leading-snug group-hover:underline">{event.title}</h3>
         <p className="mt-0.5 text-xs text-muted">
-          {formatShortDate(event.startTime)}
+          {formatShortDate(event.startTime, locale)}
           {event.venue?.name && ` • ${event.venue.name}`}
         </p>
+        <p className="mt-1 text-xs text-muted">{city ? cityLabel(city, language) : t("unknownCity")}</p>
         <div className="mt-auto flex items-center justify-between pt-4">
           <span className="text-sm font-semibold">
             {ticketsNotRequired
-              ? "Билеты не требуются"
+              ? t("noTicketsRequired")
               : price === null
                 ? ""
                 : price === 0
-                  ? "Бесплатно"
-                  : `от ${formatPrice(price)}`}
+                  ? t("free")
+                  : t("fromPrice", { price: formatPrice(price, locale) })}
           </span>
           {!ticketsNotRequired && (
-            <span className="rounded-md bg-surface px-3 py-1 text-xs font-semibold">Билеты</span>
+            <span className="rounded-md bg-surface px-3 py-1 text-xs font-semibold">{t("tickets")}</span>
           )}
         </div>
       </div>

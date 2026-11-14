@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { useLanguage } from "../../i18n/LanguageContext";
 
 interface Props {
   open: boolean;
@@ -9,6 +10,7 @@ interface Props {
 
 // Dark overlay + white window in the middle. Closes on ×, Escape, or a click outside.
 export function Modal({ open, onClose, title, children }: Props) {
+  const { t } = useLanguage();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -31,7 +33,7 @@ export function Modal({ open, onClose, title, children }: Props) {
         <button
           type="button"
           onClick={onClose}
-          aria-label="Закрыть"
+          aria-label={t("close")}
           className="absolute right-4 top-3 text-2xl leading-none text-muted hover:text-black"
         >
           ×

@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { useLanguage } from "../../i18n/LanguageContext";
 
 type Mode = "login" | "register";
 
@@ -10,6 +12,7 @@ type Mode = "login" | "register";
 // (matches POST /api/auth/login and POST /api/auth/register).
 export function LoginModal() {
   const { isLoginOpen, closeLogin, login, register } = useAuth();
+  const { t, tx } = useLanguage();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,9 +29,9 @@ export function LoginModal() {
 
   const validate = () => {
     const e: typeof errors = {};
-    if (!/^\S+@\S+\.\S+$/.test(email)) e.email = "Введите корректный email";
-    if (password.length < 6) e.password = "Минимум 6 символов";
-    if (mode === "register" && password !== password2) e.password2 = "Пароли не совпадают";
+    if (!/^\S+@\S+\.\S+$/.test(email)) e.email = t("validEmail");
+    if (password.length < 6) e.password = t("passwordMinimum");
+    if (mode === "register" && password !== password2) e.password2 = t("passwordsDiffer");
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -44,7 +47,7 @@ export function LoginModal() {
       setPassword("");
       setPassword2("");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Что-то пошло не так");
+      setServerError(err instanceof Error ? tx(err.message) : t("genericError"));
     } finally {
       setLoading(false);
     }
@@ -62,13 +65,13 @@ export function LoginModal() {
   );
 
   return (
-    <Modal open={isLoginOpen} onClose={closeLogin} title="Вход или регистрация">
-      <h2 className="text-center text-xl font-bold">Вход или регистрация</h2>
-      <p className="mt-1 text-center text-xs text-muted">Войдите по электронной почте</p>
+    <Modal open={isLoginOpen} onClose={closeLogin} title={t("loginOrRegister")}>
+      <h2 className="text-center text-xl font-bold">{t("loginOrRegister")}</h2>
+      <p className="mt-1 text-center text-xs text-muted">{t("signInByEmail")}</p>
 
       <div className="mt-5 flex rounded-lg bg-surface p-1">
-        {tab("login", "Вход")}
-        {tab("register", "Регистрация")}
+        {tab("login", t("signInTab"))}
+        {tab("register", t("registerTab"))}
       </div>
 
       <form onSubmit={onSubmit} noValidate className="mt-4 space-y-3">
@@ -82,7 +85,7 @@ export function LoginModal() {
           error={errors.email}
         />
         <TextInput
-          label="Пароль"
+          label={t("password")}
           type="password"
           autoComplete={mode === "login" ? "current-password" : "new-password"}
           value={password}
@@ -91,7 +94,7 @@ export function LoginModal() {
         />
         {mode === "register" && (
           <TextInput
-            label="Повторите пароль"
+            label={t("repeatPassword")}
             type="password"
             autoComplete="new-password"
             value={password2}
@@ -100,15 +103,16 @@ export function LoginModal() {
           />
         )}
 
-        {serverError && <p className="rounded-md bg-red-50 p-2 text-sm text-red-700">{serverError}</p>}
+        {serverError && <p className="rounded-md bg-red-50 p-2 text-sm text-red-700">{tx(serverError)}</p>}
 
         <Button type="submit" disabled={loading} className="w-full py-3">
-          {loading ? "Подождите…" : mode === "login" ? "Войти" : "Зарегистрироваться"}
+          {loading ? t("wait") : mode === "login" ? t("login") : t("register")}
         </Button>
       </form>
+      {mode === "login" && <Link to="/forgot-password" onClick={closeLogin} className="mt-3 inline-block text-sm underline">{t("forgotPassword")}</Link>}
 
       <p className="mt-5 text-center text-xs text-muted">
-        Нажимая «{mode === "login" ? "Войти" : "Зарегистрироваться"}», вы принимаете условия Пользовательского соглашения
+        {t("agreement", { action: mode === "login" ? t("login") : t("register") })}
       </p>
     </Modal>
   );

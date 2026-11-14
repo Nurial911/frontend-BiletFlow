@@ -1,3 +1,4 @@
+import { useLanguage } from "../i18n/LanguageContext";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,11 +8,13 @@ import {
   createVenue,
   deleteEventPoster,
   getEvent,
+  getEvents,
   getOrganizerEvents,
   getOrganizerProfile,
   getTicketTypes,
   getVenues,
   manageEvent,
+  setEventSuspended,
   setTicketTypeHidden,
   updateEvent,
   updateTicketType,
@@ -33,31 +36,43 @@ import { useAuth } from "../auth/AuthContext";
 import { Button, buttonClass } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { EventPoster } from "../components/events/EventPoster";
+import { EventSuspensionDialog } from "../components/events/EventSuspensionDialog";
 import { formatTicketSalesEnd, getEventTicketSaleState, getTicketSaleState } from "../lib/ticketSales";
+import { formatDateTime } from "../lib/format";
 
 const isOrganizer = (role: string) => role.trim().toUpperCase().replace(/^ROLE_/, "") === "ORGANIZER";
+const isPlatformAdmin = (role: string) => ["PLATFORM_ADMIN", "ADMIN"].includes(role.trim().toUpperCase().replace(/^ROLE_/, ""));
+const EVENTS_PAGE_SIZE = 20;
+
+function useDashboardBase() {
+  const { user } = useAuth();
+  return isPlatformAdmin(user?.role ?? "") ? "/admin/dashboard" : "/organizer";
+}
 
 function StatusBadge({ status }: { status?: EventStatus }) {
+  const { tx } = useLanguage();
   const styles: Record<EventStatus, string> = {
     DRAFT: "bg-amber-100 text-amber-800",
     PUBLISHED: "bg-green-100 text-green-800",
     CANCELLED: "bg-red-100 text-red-800",
   };
   const labels: Record<EventStatus, string> = {
-    DRAFT: "Черновик",
-    PUBLISHED: "Опубликовано",
-    CANCELLED: "Отменено",
+    DRAFT: tx("Черновик"),
+    PUBLISHED: tx("Опубликовано"),
+    CANCELLED: tx("Отменено"),
   };
   const value = status ?? "DRAFT";
-  return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles[value]}`}>{labels[value]}</span>;
+  return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${styles[value]}`}>{tx(labels[value])}</span>;
 }
 
 function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyMessage: string }) {
+  const { tx, locale } = useLanguage();
+  const base = useDashboardBase();
   if (events.length === 0) {
     return (
       <div className="rounded-xl bg-surface p-8 text-center">
         <p className="text-sm text-muted">{emptyMessage}</p>
-        <Link to="/organizer/create" className={`${buttonClass()} mt-4`}>Создать событие</Link>
+        {base === "/organizer" && <Link to={`${base}/create`} className={`${buttonClass()} mt-4`}>{tx("Создать событие")}</Link>}
       </div>
     );
   }
@@ -69,23 +84,25 @@ function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyM
           <div className="min-w-0">
             <h2 className="truncate font-semibold">{event.title}</h2>
             <p className="mt-1 text-sm text-muted">
-              {event.venue?.name ?? "Площадка не указана"} · {formatDate(event.startTime)}
+              {event.venue?.name ?? tx("Площадка не указана")} · {formatDate(event.startTime, locale)}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <StatusBadge status={event.status} />
-            <Link to={`/organizer/events/${event.id}/tickets`} className="text-sm font-semibold underline">
-              Билеты
-            </Link>
-            <Link to={`/organizer/events/${event.id}/staff`} className="text-sm font-semibold underline">
-              Сотрудники
-            </Link>
+            {base === "/organizer" && <>
+            <Link to={`${base}/events/${event.id}/tickets`} className="text-sm font-semibold underline">
+              {tx("Билеты")}</Link>
+            <Link to={`${base}/events/${event.id}/staff`} className="text-sm font-semibold underline">
+              {tx("Сотрудники")}</Link>
             {event.status !== "CANCELLED" && (
-              <Link to={`/organizer/events/${event.id}/edit`} className="text-sm font-semibold underline">
-                Изменить
-              </Link>
+              <Link to={`${base}/events/${event.id}/edit`} className="text-sm font-semibold underline">
+                {tx("Изменить")}</Link>
             )}
-            <Link to="/organizer/manage" className="text-sm font-semibold underline">Управлять</Link>
+            <Link to={`${base}/events/${event.id}/campaigns`} className="text-sm font-semibold underline">{tx("Кампании")}</Link>
+            <Link to={`${base}/events/${event.id}/activation`} className="text-sm font-semibold underline">{tx("Платные продажи")}</Link>
+            </>}
+            {base === "/admin/dashboard" && <><Link to={`/events/${event.id}`} className="text-sm underline">{tx("Просмотр")}</Link><Link to={`${base}/events/${event.id}/staff`} className="text-sm underline">{tx("Сотрудники")}</Link></>}
+            <Link to={`${base}/manage`} className="text-sm font-semibold underline">{tx("Управлять")}</Link>
           </div>
         </article>
       ))}
@@ -93,17 +110,35 @@ function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyM
   );
 }
 
-function useOrganizerEvents() {
+function useOrganizerEvents(page = 0) {
+  const { user } = useAuth();
+  const role = user?.role.trim().toUpperCase().replace(/^ROLE_/, "") ?? "";
+  const platformAdmin = isPlatformAdmin(role);
   const profile = useQuery({
-    queryKey: ["organizer-profile"],
+    queryKey: ["organizer-profile", role],
     queryFn: getOrganizerProfile,
+    enabled: !platformAdmin,
   });
   const events = useQuery({
-    queryKey: ["organizer-events", profile.data?.userId],
-    queryFn: () => getOrganizerEvents(profile.data!.userId),
-    enabled: !!profile.data?.userId,
+    queryKey: ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page],
+    queryFn: () => platformAdmin
+      ? getEvents(page, EVENTS_PAGE_SIZE)
+      : getOrganizerEvents(profile.data!.userId, page, EVENTS_PAGE_SIZE),
+    enabled: platformAdmin || !!profile.data?.userId,
   });
-  return { profile, events };
+  return { profile, events, platformAdmin };
+}
+
+function EventListPagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (page: number) => void }) {
+  const { tx } = useLanguage();
+  if (totalPages <= 1) return null;
+  return (
+    <div className="mt-4 flex items-center justify-center gap-3">
+      <Button variant="secondary" disabled={page === 0} onClick={() => onChange(page - 1)}>{tx("Назад")}</Button>
+      <span className="text-sm text-muted">{tx("Страница ")}{page + 1} {tx(" из ")}{totalPages}</span>
+      <Button variant="secondary" disabled={page + 1 >= totalPages} onClick={() => onChange(page + 1)}>{tx("Далее")}</Button>
+    </div>
+  );
 }
 
 function QueryState({
@@ -117,13 +152,14 @@ function QueryState({
   onRetry: () => void;
   children: ReactNode;
 }) {
-  if (loading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">Загрузка…</p>;
+  const { tx } = useLanguage();
+  if (loading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">{tx("Загрузка…")}</p>;
   if (error) {
-    const message = error instanceof Error ? error.message : "Не удалось загрузить данные.";
+    const message = error instanceof Error ? tx(error.message) : tx("Не удалось загрузить данные.");
     return (
       <div className="rounded-xl bg-red-50 p-6 text-center text-sm text-red-800">
-        <p>{message}</p>
-        <Button variant="secondary" className="mt-3" onClick={onRetry}>Повторить</Button>
+        <p>{tx(message)}</p>
+        <Button variant="secondary" className="mt-3" onClick={onRetry}>{tx("Повторить")}</Button>
       </div>
     );
   }
@@ -131,35 +167,36 @@ function QueryState({
 }
 
 export function OrganizerGuard() {
+  const { tx } = useLanguage();
   const { user, isLoggedIn, isUserLoading, userError, refetchUser, openLogin } = useAuth();
 
   if (!isLoggedIn) {
     return (
       <AccessMessage
-        title="Войдите в аккаунт"
-        detail="Для доступа к кабинету организатора нужно авторизоваться."
-        action={<Button onClick={openLogin}>Войти</Button>}
+        title={tx("Войдите в аккаунт")}
+        detail={tx("Для доступа к кабинету организатора нужно авторизоваться.")}
+        action={<Button onClick={openLogin}>{tx("Войти")}</Button>}
       />
     );
   }
   if (isUserLoading || !user && !userError) {
-    return <p className="rounded-xl bg-surface p-6 text-center text-sm">Проверяем аккаунт…</p>;
+    return <p className="rounded-xl bg-surface p-6 text-center text-sm">{tx("Проверяем аккаунт…")}</p>;
   }
   if (userError) {
     return (
       <AccessMessage
-        title="Не удалось проверить аккаунт"
-        detail={userError instanceof Error ? userError.message : "Попробуйте ещё раз."}
-        action={<Button variant="secondary" onClick={refetchUser}>Повторить</Button>}
+        title={tx("Не удалось проверить аккаунт")}
+        detail={userError instanceof Error ? tx(userError.message) : tx("Попробуйте ещё раз.")}
+        action={<Button variant="secondary" onClick={refetchUser}>{tx("Повторить")}</Button>}
       />
     );
   }
   if (!user || !isOrganizer(user.role)) {
     return (
       <AccessMessage
-        title="Доступ только для организаторов"
-        detail={`Текущая роль: ${user?.role ?? "не определена"}. Попросите администратора назначить роль ORGANIZER.`}
-        action={<Link to="/" className={buttonClass("secondary")}>На главную</Link>}
+        title={tx("Нет доступа к управлению мероприятиями")}
+        detail={tx("Текущая роль: {0}.", [user?.role ?? tx("не определена")])}
+        action={<Link to="/" className={buttonClass("secondary")}>{tx("На главную")}</Link>}
       />
     );
   }
@@ -167,30 +204,36 @@ export function OrganizerGuard() {
 }
 
 function AccessMessage({ title, detail, action }: { title: string; detail: string; action: ReactNode }) {
+  const { tx } = useLanguage();
   return (
     <section className="mx-auto max-w-xl rounded-2xl border p-8 text-center">
-      <h1 className="text-xl font-bold">{title}</h1>
-      <p className="mt-2 text-sm text-muted">{detail}</p>
+      <h1 className="text-xl font-bold">{tx(title)}</h1>
+      <p className="mt-2 text-sm text-muted">{tx(detail)}</p>
       <div className="mt-5">{action}</div>
     </section>
   );
 }
 
 export function OrganizerDashboardLayout() {
+  const { tx } = useLanguage();
+  const base = useDashboardBase();
+  const platformAdmin = base === "/admin/dashboard";
   const tabs = [
-    { to: "/organizer/events", label: "My Events" },
-    { to: "/organizer/create", label: "Create Event" },
-    { to: "/organizer/manage", label: "Event Management" },
-    { to: "/organizer/sales", label: "Продажи" },
+    { to: `${base}/events`, label: platformAdmin ? tx("Все мероприятия") : tx("Мои мероприятия") },
+    ...(!platformAdmin ? [{ to: `${base}/create`, label: tx("Создать мероприятие") }] : []),
+    { to: `${base}/manage`, label: tx("Управление") },
+    { to: `${base}/sales`, label: tx("Продажи") },
+    ...(platformAdmin ? [{ to: `${base}/verification`, label: tx("Заявки организаторов") }, { to: `${base}/activations`, label: tx("Платные продажи") }, { to: `${base}/support`, label: tx("Эскалации") }] : [{ to: "/support", label: tx("Поддержка") }]),
+    { to: "/staff", label: tx("Check-in") },
   ];
 
   return (
     <section>
       <div className="mb-6">
-        <p className="text-sm text-muted">Кабинет организатора</p>
-        <h1 className="mt-1 text-2xl font-bold">Управление событиями</h1>
+        <p className="text-sm text-muted">{platformAdmin ? tx("Панель платформенного администратора") : tx("Кабинет организатора")}</p>
+        <h1 className="mt-1 text-2xl font-bold">{platformAdmin ? tx("Управление всеми мероприятиями") : tx("Управление событиями")}</h1>
       </div>
-      <nav aria-label="Разделы кабинета организатора" className="mb-6 flex gap-2 overflow-x-auto border-b pb-3">
+      <nav aria-label={platformAdmin ? tx("Разделы панели администратора") : tx("Разделы кабинета организатора")} className="mb-6 flex gap-2 overflow-x-auto border-b pb-3">
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}
@@ -209,26 +252,31 @@ export function OrganizerDashboardLayout() {
 }
 
 export function MyOrganizerEventsPage() {
-  const { profile, events } = useOrganizerEvents();
+  const { tx } = useLanguage();
+  const [page, setPage] = useState(0);
+  const base = useDashboardBase();
+  const { profile, events, platformAdmin } = useOrganizerEvents(page);
   const retry = () => {
-    void profile.refetch();
+    if (!platformAdmin) void profile.refetch();
     void events.refetch();
   };
   return (
-    <QueryState loading={profile.isLoading || events.isLoading} error={profile.error ?? events.error} onRetry={retry}>
+    <QueryState loading={(!platformAdmin && profile.isLoading) || events.isLoading} error={(platformAdmin ? null : profile.error) ?? events.error} onRetry={retry}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold">My Events</h2>
-          <p className="text-sm text-muted">Все события, созданные вашим аккаунтом организатора.</p>
+          <h2 className="text-lg font-bold">{platformAdmin ? tx("Все мероприятия платформы") : tx("Мои мероприятия")}</h2>
+          <p className="text-sm text-muted">{platformAdmin ? tx("Модерируйте мероприятия всех организаторов.") : tx("Все события, созданные вашим аккаунтом организатора.")}</p>
         </div>
-        <Link to="/organizer/create" className={buttonClass()}>Создать событие</Link>
+        {!platformAdmin && <Link to={`${base}/create`} className={buttonClass()}>{tx("Создать событие")}</Link>}
       </div>
-      <OrganizerEventsList events={events.data?.content ?? []} emptyMessage="У вас пока нет событий." />
+      <OrganizerEventsList events={events.data?.content ?? []} emptyMessage={platformAdmin ? tx("Мероприятия не найдены.") : tx("У вас пока нет событий.")} />
+      <EventListPagination page={page} totalPages={events.data?.totalPages ?? 0} onChange={setPage} />
     </QueryState>
   );
 }
 
 export function CreateOrganizerEventPage() {
+  const { tx } = useLanguage();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const venues = useQuery({ queryKey: ["venues"], queryFn: () => getVenues() });
@@ -241,7 +289,7 @@ export function CreateOrganizerEventPage() {
       ]);
     },
   });
-  if (venues.isLoading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">Загрузка площадок…</p>;
+  if (venues.isLoading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">{tx("Загрузка площадок…")}</p>;
   if (venues.error) {
     return (
       <QueryState
@@ -257,12 +305,12 @@ export function CreateOrganizerEventPage() {
   return (
     <div className="max-w-3xl">
       <h2 className="text-lg font-bold">Create Event</h2>
-      <p className="mb-5 text-sm text-muted">После создания событие появится в списке как черновик.</p>
+      <p className="mb-5 text-sm text-muted">{tx("После создания событие появится в списке как черновик.")}</p>
       <OrganizerEventForm
         venues={venues.data?.content ?? []}
         isPending={mutation.isPending}
         error={mutation.error}
-        submitLabel={mutation.isPending ? "Создаём…" : "Создать событие"}
+        submitLabel={mutation.isPending ? tx("Создаём…") : tx("Создать событие")}
         onSubmit={(request) => mutation.mutate(request, {
           onSuccess: (createdEvent) => navigate(`/organizer/events/${createdEvent.id}/tickets`),
         })}
@@ -272,9 +320,11 @@ export function CreateOrganizerEventPage() {
 }
 
 export function EditOrganizerEventPage() {
+  const { tx } = useLanguage();
   const { eventId: eventIdParam } = useParams();
   const eventId = Number(eventIdParam);
   const navigate = useNavigate();
+  const base = useDashboardBase();
   const queryClient = useQueryClient();
   const event = useQuery({
     queryKey: ["event", eventId],
@@ -290,14 +340,14 @@ export function EditOrganizerEventPage() {
         queryClient.invalidateQueries({ queryKey: ["organizer-events"] }),
         queryClient.invalidateQueries({ queryKey: ["events"] }),
       ]);
-      navigate("/organizer/events");
+      navigate(`${base}/events`);
     },
   });
 
   if (!Number.isSafeInteger(eventId) || eventId <= 0) {
-    return <AccessMessage title="Некорректный ID события" detail="Проверьте ссылку и выберите событие из списка." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
+    return <AccessMessage title={tx("Некорректный ID события")} detail={tx("Проверьте ссылку и выберите событие из списка.")} action={<Link to={`${base}/events`} className={buttonClass("secondary")}>{tx("К мероприятиям")}</Link>} />;
   }
-  if (event.isLoading || venues.isLoading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">Загрузка события…</p>;
+  if (event.isLoading || venues.isLoading) return <p className="rounded-xl bg-surface p-6 text-center text-sm">{tx("Загрузка события…")}</p>;
   if (event.error || venues.error) {
     return (
       <QueryState
@@ -310,24 +360,24 @@ export function EditOrganizerEventPage() {
     );
   }
   if (!event.data) {
-    return <AccessMessage title="Событие не найдено" detail="Возможно, оно было удалено или у вас нет доступа." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
+    return <AccessMessage title={tx("Событие не найдено")} detail={tx("Возможно, оно было удалено или у вас нет доступа.")} action={<Link to={`${base}/events`} className={buttonClass("secondary")}>{tx("К мероприятиям")}</Link>} />;
   }
   if (event.data.status === "CANCELLED") {
-    return <AccessMessage title="Событие отменено" detail="Отменённые события нельзя редактировать." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
+    return <AccessMessage title={tx("Событие отменено")} detail={tx("Отменённые события нельзя редактировать.")} action={<Link to={`${base}/events`} className={buttonClass("secondary")}>{tx("К мероприятиям")}</Link>} />;
   }
   const existingEvent = event.data;
 
   return (
     <div className="max-w-3xl">
-      <h2 className="text-lg font-bold">Редактирование события</h2>
-      <p className="mb-5 text-sm text-muted">Изменения сохраняются в существующем событии.</p>
+      <h2 className="text-lg font-bold">{tx("Редактирование события")}</h2>
+      <p className="mb-5 text-sm text-muted">{tx("Изменения сохраняются в существующем событии.")}</p>
       <OrganizerEventForm
         event={existingEvent}
         venues={venues.data?.content ?? []}
         isPending={mutation.isPending}
         error={mutation.error}
-        submitLabel={mutation.isPending ? "Сохраняем…" : "Сохранить изменения"}
-        onCancel={() => navigate("/organizer/events")}
+        submitLabel={mutation.isPending ? tx("Сохраняем…") : tx("Сохранить изменения")}
+        onCancel={() => navigate(`${base}/events`)}
         onSubmit={(request) => mutation.mutate(buildEventUpdate(existingEvent, request))}
       />
       <PosterManager event={existingEvent} />
@@ -336,6 +386,7 @@ export function EditOrganizerEventPage() {
 }
 
 function PosterManager({ event }: { event: Event }) {
+  const { tx } = useLanguage();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState("");
@@ -361,18 +412,18 @@ function PosterManager({ event }: { event: Event }) {
   const isPending = uploadMutation.isPending || deleteMutation.isPending;
   const validateFile = (selectedFile: File) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(selectedFile.type)) {
-      return "Выберите файл JPEG, PNG или WebP.";
+      return tx("Выберите файл JPEG, PNG или WebP.");
     }
-    if (selectedFile.size === 0) return "Файл постера пустой.";
-    if (selectedFile.size > 5 * 1024 * 1024) return "Размер постера не должен превышать 5 МБ.";
+    if (selectedFile.size === 0) return tx("Файл постера пустой.");
+    if (selectedFile.size > 5 * 1024 * 1024) return tx("Размер постера не должен превышать 5 МБ.");
     return "";
   };
 
   return (
     <section className="space-y-4 rounded-xl border p-5">
       <div>
-        <h3 className="font-semibold">Постер события</h3>
-        <p className="mt-1 text-sm text-muted">JPEG, PNG или WebP, не более 5 МБ.</p>
+        <h3 className="font-semibold">{tx("Постер события")}</h3>
+        <p className="mt-1 text-sm text-muted">{tx("JPEG, PNG или WebP, не более 5 МБ.")}</p>
       </div>
       <EventPoster
         posterUrl={event.posterUrl}
@@ -380,11 +431,11 @@ function PosterManager({ event }: { event: Event }) {
         className="aspect-[4/3] max-w-sm rounded-lg"
       />
       {event.status === "CANCELLED" ? (
-        <p className="text-sm text-muted">Постер отменённого события нельзя изменить или удалить.</p>
+        <p className="text-sm text-muted">{tx("Постер отменённого события нельзя изменить или удалить.")}</p>
       ) : (
         <>
           <label className="block space-y-1.5 text-sm font-medium">
-            <span>Выберите изображение</span>
+            <span>{tx("Выберите изображение")}</span>
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -398,15 +449,15 @@ function PosterManager({ event }: { event: Event }) {
               }}
             />
           </label>
-          {validationError && <p role="alert" className="text-sm text-red-700">{validationError}</p>}
+          {validationError && <p role="alert" className="text-sm text-red-700">{tx(validationError)}</p>}
           {uploadMutation.error && (
             <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-              {uploadMutation.error instanceof Error ? uploadMutation.error.message : "Не удалось загрузить постер."}
+              {uploadMutation.error instanceof Error ? tx(uploadMutation.error.message) : tx("Не удалось загрузить постер.")}
             </p>
           )}
           {deleteMutation.error && (
             <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-              {deleteMutation.error instanceof Error ? deleteMutation.error.message : "Не удалось удалить постер."}
+              {deleteMutation.error instanceof Error ? tx(deleteMutation.error.message) : tx("Не удалось удалить постер.")}
             </p>
           )}
           <div className="flex flex-wrap gap-3">
@@ -415,7 +466,7 @@ function PosterManager({ event }: { event: Event }) {
               disabled={!file || !!validationError || isPending}
               onClick={() => file && uploadMutation.mutate(file)}
             >
-              {uploadMutation.isPending ? "Загружаем…" : "Загрузить постер"}
+              {uploadMutation.isPending ? tx("Загружаем…") : tx("Загрузить постер")}
             </Button>
             {event.posterUrl && (
               <Button
@@ -423,10 +474,10 @@ function PosterManager({ event }: { event: Event }) {
                 variant="secondary"
                 disabled={isPending}
                 onClick={() => {
-                  if (window.confirm("Удалить постер этого события?")) deleteMutation.mutate();
+                  if (window.confirm(tx("Удалить постер этого события?"))) deleteMutation.mutate();
                 }}
               >
-                {deleteMutation.isPending ? "Удаляем…" : "Удалить постер"}
+                {deleteMutation.isPending ? tx("Удаляем…") : tx("Удалить постер")}
               </Button>
             )}
           </div>
@@ -437,10 +488,12 @@ function PosterManager({ event }: { event: Event }) {
 }
 
 export function OrganizerTicketsPage() {
+  const { tx } = useLanguage();
   const { eventId: eventIdParam } = useParams();
   const eventId = Number(eventIdParam);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const base = useDashboardBase();
   const event = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => getEvent(eventId),
@@ -482,10 +535,10 @@ export function OrganizerTicketsPage() {
   });
 
   if (!Number.isSafeInteger(eventId) || eventId <= 0) {
-    return <AccessMessage title="Некорректный ID события" detail="Проверьте ссылку и выберите событие из списка." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
+    return <AccessMessage title={tx("Некорректный ID события")} detail={tx("Проверьте ссылку и выберите событие из списка.")} action={<Link to={`${base}/events`} className={buttonClass("secondary")}>{tx("К мероприятиям")}</Link>} />;
   }
   if (event.isLoading || ticketTypes.isLoading) {
-    return <p className="rounded-xl bg-surface p-6 text-center text-sm">Загружаем событие и билеты…</p>;
+    return <p className="rounded-xl bg-surface p-6 text-center text-sm">{tx("Загружаем событие и билеты…")}</p>;
   }
   if (event.error || ticketTypes.error) {
     return (
@@ -499,7 +552,7 @@ export function OrganizerTicketsPage() {
     );
   }
   if (!event.data) {
-    return <AccessMessage title="Событие не найдено" detail="Возможно, оно было удалено или у вас нет доступа." action={<Link to="/organizer/events" className={buttonClass("secondary")}>К моим событиям</Link>} />;
+    return <AccessMessage title={tx("Событие не найдено")} detail={tx("Возможно, оно было удалено или у вас нет доступа.")} action={<Link to={`${base}/events`} className={buttonClass("secondary")}>{tx("К мероприятиям")}</Link>} />;
   }
 
   const tickets = ticketTypes.data ?? [];
@@ -512,29 +565,26 @@ export function OrganizerTicketsPage() {
       <PosterManager event={event.data} />
       {saleState === "sold-out" && (
         <p role="status" className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800">
-          Все доступные билеты на мероприятие распроданы.
-        </p>
+          {tx("Все доступные билеты на мероприятие распроданы.")}</p>
       )}
       {saleState === "sales-ended" && (
         <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-          Срок продажи билетов завершён. Билеты, не проданные до дедлайна, больше недоступны для покупки.
-        </p>
+          {tx("Срок продажи билетов завершён. Билеты, не проданные до дедлайна, больше недоступны для покупки.")}</p>
       )}
       <div>
-        <p className="text-sm text-muted">Новое событие сохранено</p>
-        <h2 className="mt-1 text-xl font-bold">Билеты: {event.data.title}</h2>
+        <p className="text-sm text-muted">{tx("Новое событие сохранено")}</p>
+        <h2 className="mt-1 text-xl font-bold">{tx("Билеты: ")}{event.data.title}</h2>
         <p className="mt-2 text-sm text-muted">
-          Добавляйте типы билетов, например «Стандарт» и «VIP». Количество — это доступные места этого типа, цена указывается в ₸.
-        </p>
+          {tx("Добавляйте типы билетов, например «Стандарт» и «VIP». Количество — это доступные места этого типа, цена указывается в ₸.")}</p>
         {event.data.capacity != null && (
           <p className="mt-2 text-sm">
-            Вместимость события: {event.data.capacity}. Распределено по типам билетов: {allocated}. Осталось распределить: {remaining}.
+            {tx("Вместимость события: ")}{event.data.capacity}{tx(". Распределено по типам билетов: ")}{allocated}{tx(". Осталось распределить: ")}{remaining}.
           </p>
         )}
       </div>
 
       {tickets.length > 0 && (
-        <section aria-label="Созданные типы билетов" className="space-y-3">
+        <section aria-label={tx("Созданные типы билетов")} className="space-y-3">
           {tickets.map((ticket) => (
             <TicketTypeCard
               key={ticket.id}
@@ -554,7 +604,7 @@ export function OrganizerTicketsPage() {
       )}
 
       {event.data.status === "CANCELLED" ? (
-        <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Для отменённого события нельзя менять билеты.</p>
+        <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{tx("Для отменённого события нельзя менять билеты.")}</p>
       ) : remaining !== 0 ? (
         <TicketTypeForm
           key={tickets.length}
@@ -566,12 +616,11 @@ export function OrganizerTicketsPage() {
         />
       ) : (
         <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-          Вся вместимость события уже распределена. Увеличьте вместимость в настройках события, если нужно добавить ещё билеты.
-        </p>
+          {tx("Вся вместимость события уже распределена. Увеличьте вместимость в настройках события, если нужно добавить ещё билеты.")}</p>
       )}
 
-      <Button variant="secondary" onClick={() => navigate("/organizer/events")}>
-        {tickets.length > 0 ? "Завершить и вернуться к событиям" : "Добавить билеты позже"}
+      <Button variant="secondary" onClick={() => navigate(`${base}/events`)}>
+        {tickets.length > 0 ? tx("Завершить и вернуться к событиям") : tx("Добавить билеты позже")}
       </Button>
     </div>
   );
@@ -594,6 +643,7 @@ function TicketTypeCard({
   onUpdate: (request: UpdateTicketTypeRequest, onSuccess: () => void) => void;
   onToggleHidden: () => void;
 }) {
+  const { tx, locale } = useLanguage();
   const [editing, setEditing] = useState(false);
   const saleState = getTicketSaleState(ticket);
   return (
@@ -603,27 +653,27 @@ function TicketTypeCard({
           <h3 className="font-semibold">{ticket.name}</h3>
           {ticket.description && <p className="mt-1 text-sm text-muted">{ticket.description}</p>}
           <p className="mt-1 text-sm text-muted">
-            {ticket.price === 0 ? "Бесплатно" : `${ticket.price} ₸`} · Доступно: {ticket.available} из {ticket.quantity} · Продано: {ticket.sold}
+            {ticket.price === 0 ? tx("Бесплатно") : `${ticket.price} ₸`} {tx(" · Доступно: ")}{ticket.available} {tx(" из ")}{ticket.quantity} {tx(" · Продано: ")}{ticket.sold}
           </p>
-          {saleState === "sold-out" && <p className="mt-1 text-sm font-semibold text-red-700">Билеты этого типа распроданы</p>}
+          {saleState === "sold-out" && <p className="mt-1 text-sm font-semibold text-red-700">{tx("Билеты этого типа распроданы")}</p>}
           {saleState === "sales-ended" && (
             <p className="mt-1 text-sm font-semibold text-amber-800">
-              Продажи завершены{ticket.salesEnd ? ` ${formatTicketSalesEnd(ticket.salesEnd)}` : ""}
+              {tx("Продажи завершены")}{ticket.salesEnd ? ` ${formatTicketSalesEnd(ticket.salesEnd, locale)}` : ""}
             </p>
           )}
           {saleState === "not-started" && ticket.salesStart && (
-            <p className="mt-1 text-sm text-muted">Продажи начнутся {formatTicketSalesEnd(ticket.salesStart)}</p>
+            <p className="mt-1 text-sm text-muted">{tx("Продажи начнутся ")}{formatTicketSalesEnd(ticket.salesStart, locale)}</p>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${ticket.hidden ? "bg-gray-100 text-gray-700" : "bg-green-100 text-green-800"}`}>
-            {ticket.hidden ? "Скрыт" : "Активен"}
+            {ticket.hidden ? tx("Скрыт") : tx("Активен")}
           </span>
           <Button variant="secondary" disabled={isPending} onClick={() => setEditing((current) => !current)}>
-            {editing ? "Закрыть" : "Изменить"}
+            {editing ? tx("Закрыть") : tx("Изменить")}
           </Button>
           <Button variant="secondary" disabled={isPending} onClick={onToggleHidden}>
-            {ticket.hidden ? "Показать" : "Скрыть"}
+            {ticket.hidden ? tx("Показать") : tx("Скрыть")}
           </Button>
         </div>
       </div>
@@ -638,10 +688,10 @@ function TicketTypeCard({
       )}
       {!editing && updateError != null && (
         <p role="alert" className="mt-3 text-sm text-red-700">
-          {updateError instanceof Error ? updateError.message : "Не удалось обновить тип билета."}
+          {updateError instanceof Error ? tx(updateError.message) : tx("Не удалось обновить тип билета.")}
         </p>
       )}
-      {visibilityError != null && <p role="alert" className="mt-3 text-sm text-red-700">{visibilityError instanceof Error ? visibilityError.message : "Не удалось изменить видимость билета."}</p>}
+      {visibilityError != null && <p role="alert" className="mt-3 text-sm text-red-700">{visibilityError instanceof Error ? tx(visibilityError.message) : tx("Не удалось изменить видимость билета.")}</p>}
     </article>
   );
 }
@@ -659,6 +709,7 @@ function TicketTypeEditForm({
   error: unknown;
   onSubmit: (request: UpdateTicketTypeRequest) => void;
 }) {
+  const { tx } = useLanguage();
   const [validationError, setValidationError] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -672,18 +723,18 @@ function TicketTypeEditForm({
     const salesStart = String(form.get("salesStart") ?? "");
     const salesEnd = String(form.get("salesEnd") ?? "");
     const maxPerOrder = Number(form.get("maxPerOrder"));
-    if (!name) return setValidationError("Укажите название типа билета.");
+    if (!name) return setValidationError(tx("Укажите название типа билета."));
     if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(priceValue)) {
-      return setValidationError("Цена должна быть неотрицательной и содержать не более двух знаков после запятой.");
+      return setValidationError(tx("Цена должна быть неотрицательной и содержать не более двух знаков после запятой."));
     }
     if (!Number.isSafeInteger(quantity) || quantity < ticket.sold || (maxQuantity !== null && quantity > maxQuantity)) {
-      return setValidationError(`Количество должно быть не меньше уже проданных билетов (${ticket.sold}) и не больше ${maxQuantity ?? "допустимого лимита"}.`);
+      return setValidationError(tx("Количество должно быть не меньше уже проданных билетов ({0}) и не больше {1}.", [ticket.sold, maxQuantity ?? tx("допустимого лимита")]));
     }
     if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || maxPerOrder > quantity) {
-      return setValidationError("Лимит на заказ должен быть положительным числом и не превышать количество билетов.");
+      return setValidationError(tx("Лимит на заказ должен быть положительным числом и не превышать количество билетов."));
     }
     if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
-      return setValidationError("Начало продаж должно быть раньше окончания.");
+      return setValidationError(tx("Начало продаж должно быть раньше окончания."));
     }
     const request: UpdateTicketTypeRequest = { name, description, price, quantity, maxPerOrder };
     if (salesStart) request.salesStart = toApiLocalDateTime(salesStart);
@@ -692,16 +743,16 @@ function TicketTypeEditForm({
   };
   return (
     <form onSubmit={submit} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2">
-      <FormField label="Название"><input name="name" required maxLength={100} defaultValue={ticket.name} className={fieldClass} /></FormField>
-      <FormField label="Описание"><textarea name="description" rows={2} defaultValue={ticket.description ?? ""} className={fieldClass} /></FormField>
-      <FormField label="Цена, ₸"><input name="price" type="number" min="0" step="0.01" required defaultValue={ticket.price} className={fieldClass} /></FormField>
-      <FormField label="Количество (не меньше проданного)"><input name="quantity" type="number" min={ticket.sold} max={maxQuantity ?? undefined} step="1" required defaultValue={ticket.quantity} className={fieldClass} /></FormField>
-      <FormField label="Начало продаж"><input name="salesStart" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesStart)} className={fieldClass} /></FormField>
-      <FormField label="Окончание продаж"><input name="salesEnd" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesEnd)} className={fieldClass} /></FormField>
-      <FormField label="Максимум в одном заказе"><input name="maxPerOrder" type="number" min="1" max={ticket.quantity} step="1" required defaultValue={ticket.maxPerOrder ?? 10} className={fieldClass} /></FormField>
-      <p className="text-xs text-muted sm:col-span-2">Пустые даты отправляются как отсутствие изменения; очистка даты зависит от поддержки backend.</p>
-      {(validationError || error != null) && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{validationError || (error instanceof Error ? error.message : "Не удалось обновить тип билета.")}</p>}
-      <Button type="submit" disabled={isPending} className="sm:col-span-2">{isPending ? "Сохраняем…" : "Сохранить тип билета"}</Button>
+      <FormField label={tx("Название")}><input name="name" required maxLength={100} defaultValue={ticket.name} className={fieldClass} /></FormField>
+      <FormField label={tx("Описание")}><textarea name="description" rows={2} defaultValue={ticket.description ?? ""} className={fieldClass} /></FormField>
+      <FormField label={tx("Цена, ₸")}><input name="price" type="number" min="0" step="0.01" required defaultValue={ticket.price} className={fieldClass} /></FormField>
+      <FormField label={tx("Количество (не меньше проданного)")}><input name="quantity" type="number" min={ticket.sold} max={maxQuantity ?? undefined} step="1" required defaultValue={ticket.quantity} className={fieldClass} /></FormField>
+      <FormField label={tx("Начало продаж")}><input name="salesStart" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesStart)} className={fieldClass} /></FormField>
+      <FormField label={tx("Окончание продаж")}><input name="salesEnd" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesEnd)} className={fieldClass} /></FormField>
+      <FormField label={tx("Максимум в одном заказе")}><input name="maxPerOrder" type="number" min="1" max={ticket.quantity} step="1" required defaultValue={ticket.maxPerOrder ?? 10} className={fieldClass} /></FormField>
+      <p className="text-xs text-muted sm:col-span-2">{tx("Пустые даты отправляются как отсутствие изменения; очистка даты зависит от поддержки backend.")}</p>
+      {(validationError || error != null) && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{tx(validationError) || (error instanceof Error ? tx(error.message) : tx("Не удалось обновить тип билета."))}</p>}
+      <Button type="submit" disabled={isPending} className="sm:col-span-2">{isPending ? tx("Сохраняем…") : tx("Сохранить тип билета")}</Button>
     </form>
   );
 }
@@ -719,6 +770,7 @@ function TicketTypeForm({
   error: unknown;
   onSubmit: (request: CreateTicketTypeRequest) => void;
 }) {
+  const { tx } = useLanguage();
   const [validationError, setValidationError] = useState("");
 
   const submit = (formEvent: FormEvent<HTMLFormElement>) => {
@@ -735,30 +787,30 @@ function TicketTypeForm({
       const salesEnd = String(form.get("salesEnd") ?? "");
       const eventStart = new Date(event.startTime).getTime();
 
-      if (!name) throw new Error("Укажите название типа билета.");
+      if (!name) throw new Error(tx("Укажите название типа билета."));
       if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(String(form.get("price")))) {
-        throw new Error("Цена должна быть неотрицательной и содержать не более двух знаков после запятой.");
+        throw new Error(tx("Цена должна быть неотрицательной и содержать не более двух знаков после запятой."));
       }
       if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-        throw new Error("Количество билетов должно быть целым числом больше нуля.");
+        throw new Error(tx("Количество билетов должно быть целым числом больше нуля."));
       }
       if (maxQuantity !== null && quantity > maxQuantity) {
-        throw new Error(`Можно добавить не более ${maxQuantity} билетов с учётом уже распределённых мест.`);
+        throw new Error(tx("Можно добавить не более {0} билетов с учётом уже распределённых мест.", [maxQuantity]));
       }
       if (maxPerOrderValue) {
         const maxPerOrder = Number(maxPerOrderValue);
         if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || maxPerOrder > quantity) {
-          throw new Error("Лимит билетов в заказе должен быть положительным числом и не превышать количество билетов.");
+          throw new Error(tx("Лимит билетов в заказе должен быть положительным числом и не превышать количество билетов."));
         }
       }
       if (salesStart && new Date(salesStart).getTime() >= eventStart) {
-        throw new Error("Продажи должны начаться до начала события.");
+        throw new Error(tx("Продажи должны начаться до начала события."));
       }
       if (salesEnd && new Date(salesEnd).getTime() > eventStart) {
-        throw new Error("Продажи должны закончиться не позже начала события.");
+        throw new Error(tx("Продажи должны закончиться не позже начала события."));
       }
       if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
-        throw new Error("Начало продаж должно быть раньше окончания.");
+        throw new Error(tx("Начало продаж должно быть раньше окончания."));
       }
 
       const request: CreateTicketTypeRequest = { name, price, quantity };
@@ -768,44 +820,44 @@ function TicketTypeForm({
       if (maxPerOrderValue) request.maxPerOrder = Number(maxPerOrderValue);
       onSubmit(request);
     } catch (caught) {
-      setValidationError(caught instanceof Error ? caught.message : "Проверьте данные билета.");
+      setValidationError(caught instanceof Error ? tx(caught.message) : tx("Проверьте данные билета."));
     }
   };
 
   return (
     <form onSubmit={submit} className="space-y-4 rounded-xl border p-5">
-      <h3 className="font-semibold">Добавить тип билета</h3>
-      <FormField label="Название">
-        <input name="name" required maxLength={100} className={fieldClass} placeholder="Например, Стандарт или VIP" />
+      <h3 className="font-semibold">{tx("Добавить тип билета")}</h3>
+      <FormField label={tx("Название")}>
+        <input name="name" required maxLength={100} className={fieldClass} placeholder={tx("Например, Стандарт или VIP")} />
       </FormField>
-      <FormField label="Описание">
+      <FormField label={tx("Описание")}>
         <textarea name="description" rows={2} className={fieldClass} />
       </FormField>
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Цена, ₸ (0 — бесплатно)">
+        <FormField label={tx("Цена, ₸ (0 — бесплатно)")}>
           <input name="price" type="number" min="0" step="0.01" required className={fieldClass} />
         </FormField>
-        <FormField label="Количество билетов / мест">
+        <FormField label={tx("Количество билетов / мест")}>
           <input name="quantity" type="number" min="1" max={maxQuantity ?? undefined} step="1" required className={fieldClass} />
         </FormField>
-        <FormField label="Начало продаж">
+        <FormField label={tx("Начало продаж")}>
           <input name="salesStart" type="datetime-local" className={fieldClass} />
         </FormField>
-        <FormField label="Окончание продаж">
+        <FormField label={tx("Окончание продаж")}>
           <input name="salesEnd" type="datetime-local" className={fieldClass} />
         </FormField>
-        <FormField label="Максимум билетов в одном заказе">
+        <FormField label={tx("Максимум билетов в одном заказе")}>
           <input name="maxPerOrder" type="number" min="1" step="1" defaultValue="10" className={fieldClass} />
         </FormField>
       </div>
-      {validationError && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{validationError}</p>}
+      {validationError && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{tx(validationError)}</p>}
       {error !== null && error !== undefined && (
         <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-          {error instanceof Error ? error.message : "Не удалось создать тип билета."}
+          {error instanceof Error ? tx(error.message) : tx("Не удалось создать тип билета.")}
         </p>
       )}
       <Button type="submit" disabled={isPending}>
-        {isPending ? "Добавляем…" : "Добавить тип билета"}
+        {isPending ? tx("Добавляем…") : tx("Добавить тип билета")}
       </Button>
     </form>
   );
@@ -828,6 +880,7 @@ function OrganizerEventForm({
   onCancel?: () => void;
   onSubmit: (request: CreateEventRequest) => void;
 }) {
+  const { tx } = useLanguage();
   const [validationError, setValidationError] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState(event?.venue?.id ? String(event.venue.id) : "");
   const [capacityValue, setCapacityValue] = useState(event?.capacity == null ? "" : String(event.capacity));
@@ -862,7 +915,7 @@ function OrganizerEventForm({
         event?.capacity,
       ));
     } catch (caught) {
-      setValidationError(caught instanceof Error ? caught.message : "Проверьте введённые данные.");
+      setValidationError(caught instanceof Error ? tx(caught.message) : tx("Проверьте введённые данные."));
     }
   };
   const knownVenue = venues.some((venue) => venue.id === event?.venue?.id);
@@ -876,7 +929,7 @@ function OrganizerEventForm({
     const capacity = Number(venueCapacity);
     if (!name || !address || !Number.isSafeInteger(capacity) || capacity <= 0) {
       venueMutation.reset();
-      setVenueFormError("Укажите название, адрес и вместимость площадки (целое число больше нуля).");
+      setVenueFormError(tx("Укажите название, адрес и вместимость площадки (целое число больше нуля)."));
       return;
     }
     setVenueFormError("");
@@ -900,16 +953,16 @@ function OrganizerEventForm({
       }}
       className="space-y-4 rounded-xl border p-5"
     >
-      <FormField label="Название">
+      <FormField label={tx("Название")}>
         <input name="title" required maxLength={200} defaultValue={event?.title ?? ""} className={fieldClass} />
       </FormField>
-      <FormField label="Категория">
-        <input name="category" required defaultValue={event?.category ?? ""} className={fieldClass} placeholder="Например, Концерт" />
+      <FormField label={tx("Категория")}>
+        <input name="category" required defaultValue={event?.category ?? ""} className={fieldClass} placeholder={tx("Например, Концерт")} />
       </FormField>
-      <FormField label="Описание">
+      <FormField label={tx("Описание")}>
         <textarea name="description" rows={4} defaultValue={event?.description ?? ""} className={fieldClass} />
       </FormField>
-      <FormField label="Площадка">
+      <FormField label={tx("Площадка")}>
         <select
           name="venueId"
           required
@@ -917,23 +970,22 @@ function OrganizerEventForm({
           onChange={(change) => setSelectedVenueId(change.target.value)}
           className={fieldClass}
         >
-          <option value="" disabled>Выберите площадку</option>
+          <option value="" disabled>{tx("Выберите площадку")}</option>
           {event?.venue && !knownVenue && (
             <option value={event.venue.id}>
               {event.venue.name} — {event.venue.address}
-              {event.venue.capacity != null ? ` · до ${event.venue.capacity} человек` : " · без лимита"}
+              {event.venue.capacity != null ? tx(" · до {0} человек", [event.venue.capacity]) : tx(" · без лимита")}
             </option>
           )}
           {venues.map((venue) => (
             <option key={venue.id} value={venue.id}>
               {venue.name} — {venue.address}
-              {venue.capacity != null ? ` · до ${venue.capacity} человек` : " · без лимита"}
+              {venue.capacity != null ? tx(" · до {0} человек", [venue.capacity]) : tx(" · без лимита")}
             </option>
           ))}
           {newlyCreatedVenue && !venues.some((venue) => venue.id === newlyCreatedVenue.id) && (
             <option value={newlyCreatedVenue.id}>
-              {newlyCreatedVenue.name} — {newlyCreatedVenue.address} · до {newlyCreatedVenue.capacity} человек
-            </option>
+              {newlyCreatedVenue.name} — {newlyCreatedVenue.address} {tx(" · до ")}{newlyCreatedVenue.capacity} {tx(" человек")}</option>
           )}
         </select>
       </FormField>
@@ -941,8 +993,8 @@ function OrganizerEventForm({
         <Button
           type="button"
           variant="secondary"
-          title="Добавить площадку"
-          aria-label="Добавить площадку"
+          title={tx("Добавить площадку")}
+          aria-label={tx("Добавить площадку")}
           aria-expanded={showVenueForm}
           onClick={() => {
             setShowVenueForm((shown) => !shown);
@@ -950,11 +1002,11 @@ function OrganizerEventForm({
             venueMutation.reset();
           }}
         >
-          {showVenueForm ? "Закрыть" : "Добавить"}
+          {showVenueForm ? tx("Закрыть") : tx("Добавить")}
         </Button>
         {showVenueForm && (
           <div className="mt-4 space-y-3">
-            <FormField label="Название площадки">
+            <FormField label={tx("Название площадки")}>
               <input
                 value={venueName}
                 onChange={(change) => setVenueName(change.target.value)}
@@ -963,7 +1015,7 @@ function OrganizerEventForm({
                 autoComplete="organization"
               />
             </FormField>
-            <FormField label="Адрес">
+            <FormField label={tx("Адрес")}>
               <input
                 value={venueAddress}
                 onChange={(change) => setVenueAddress(change.target.value)}
@@ -972,7 +1024,7 @@ function OrganizerEventForm({
                 autoComplete="street-address"
               />
             </FormField>
-            <FormField label="Максимальная вместимость, человек">
+            <FormField label={tx("Максимальная вместимость, человек")}>
               <input
                 type="number"
                 min="1"
@@ -982,35 +1034,35 @@ function OrganizerEventForm({
                 className={fieldClass}
               />
             </FormField>
-            {venueFormError && <p role="alert" className="text-sm text-red-700">{venueFormError}</p>}
+            {venueFormError && <p role="alert" className="text-sm text-red-700">{tx(venueFormError)}</p>}
             {venueMutation.error && (
               <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                {venueMutation.error instanceof Error ? venueMutation.error.message : "Не удалось добавить площадку."}
+                {venueMutation.error instanceof Error ? tx(venueMutation.error.message) : tx("Не удалось добавить площадку.")}
               </p>
             )}
             <Button type="button" disabled={venueMutation.isPending} onClick={addVenue}>
-              {venueMutation.isPending ? "Добавляем…" : "Добавить площадку"}
+              {venueMutation.isPending ? tx("Добавляем…") : tx("Добавить площадку")}
             </Button>
           </div>
         )}
         {venues.length === 0 && (
-          <p className="mt-3 text-sm text-muted">Создайте площадку, чтобы продолжить создание события.</p>
+          <p className="mt-3 text-sm text-muted">{tx("Создайте площадку, чтобы продолжить создание события.")}</p>
         )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Начало">
+        <FormField label={tx("Начало")}>
           <input name="startTime" type="datetime-local" required defaultValue={toLocalInputValue(event?.startTime)} className={fieldClass} />
         </FormField>
-        <FormField label="Окончание">
+        <FormField label={tx("Окончание")}>
           <input name="endTime" type="datetime-local" defaultValue={toLocalInputValue(event?.endTime)} className={fieldClass} />
         </FormField>
-        <FormField label="Начало регистрации">
+        <FormField label={tx("Начало регистрации")}>
           <input name="registrationOpeningTime" type="datetime-local" defaultValue={toLocalInputValue(event?.registrationOpeningTime)} className={fieldClass} />
         </FormField>
-        <FormField label="Окончание регистрации">
+        <FormField label={tx("Окончание регистрации")}>
           <input name="registrationClosingTime" type="datetime-local" defaultValue={toLocalInputValue(event?.registrationClosingTime)} className={fieldClass} />
         </FormField>
-        <FormField label="Вместимость">
+        <FormField label={tx("Вместимость")}>
           <input
             name="capacity"
             type="number"
@@ -1024,32 +1076,29 @@ function OrganizerEventForm({
           {selectedVenue && (
             <p className="text-xs text-muted">
               {selectedVenue.capacity == null
-                ? "У площадки нет заданного ограничения вместимости."
-                : `Максимум площадки: ${selectedVenue.capacity} человек. ${
-                    capacityValue || event?.capacity != null
-                      ? `Вместимость события: ${capacityValue || event?.capacity}.`
-                      : `Если оставить пустым, вместимость события будет ${selectedVenue.capacity}.`
-                  }`}
+                ? tx("У площадки нет заданного ограничения вместимости.")
+                : tx("Максимум площадки: {0} человек. {1}", [selectedVenue.capacity, capacityValue || event?.capacity != null
+                      ? tx("Вместимость события: {0}.", [capacityValue || event?.capacity])
+                      : tx("Если оставить пустым, вместимость события будет {0}.", [selectedVenue.capacity])])}
             </p>
           )}
         </FormField>
-        <FormField label="Видимость">
+        <FormField label={tx("Видимость")}>
           <select name="visibilityStatus" defaultValue={event?.visibilityStatus ?? "PUBLIC"} className={fieldClass}>
-            <option value="PUBLIC">Публичное</option>
-            <option value="UNLISTED">По ссылке</option>
-            <option value="PRIVATE">Приватное</option>
+            <option value="PUBLIC">{tx("Публичное")}</option>
+            <option value="UNLISTED">{tx("По ссылке")}</option>
+            <option value="PRIVATE">{tx("Приватное")}</option>
           </select>
         </FormField>
       </div>
       {event && (
         <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          Backend пока не очищает необязательные дату окончания, даты регистрации и вместимость: если очистить эти поля, прежние значения сохранятся.
-        </p>
+          {tx("Backend пока не очищает необязательные дату окончания, даты регистрации и вместимость: если очистить эти поля, прежние значения сохранятся.")}</p>
       )}
-      {validationError && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{validationError}</p>}
+      {validationError && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{tx(validationError)}</p>}
       {error !== null && error !== undefined && (
         <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-          {error instanceof Error ? error.message : "Не удалось сохранить событие."}
+          {error instanceof Error ? tx(error.message) : tx("Не удалось сохранить событие.")}
         </p>
       )}
       <div className="flex flex-wrap gap-3">
@@ -1058,10 +1107,9 @@ function OrganizerEventForm({
         </Button>
         {!event && (
           <Button type="reset" variant="secondary" disabled={isPending}>
-            Очистить
-          </Button>
+            {tx("Очистить")}</Button>
         )}
-        {onCancel && <Button type="button" variant="secondary" onClick={onCancel}>Отмена</Button>}
+        {onCancel && <Button type="button" variant="secondary" onClick={onCancel}>{tx("Отмена")}</Button>}
       </div>
     </form>
   );
@@ -1163,10 +1211,14 @@ function buildEventUpdate(current: Event, form: CreateEventRequest) {
 }
 
 export function ManageOrganizerEventsPage() {
+  const { tx, locale } = useLanguage();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { profile, events } = useOrganizerEvents();
+  const base = useDashboardBase();
+  const [page, setPage] = useState(0);
+  const { profile, events, platformAdmin } = useOrganizerEvents(page);
   const [actionError, setActionError] = useState("");
+  const [suspensionTarget, setSuspensionTarget] = useState<Event | null>(null);
   const [eventPendingPublish, setEventPendingPublish] = useState<Event | null>(null);
   const [checkingTicketsForEvent, setCheckingTicketsForEvent] = useState<number | null>(null);
   const mutation = useMutation({
@@ -1178,10 +1230,26 @@ export function ManageOrganizerEventsPage() {
         queryClient.invalidateQueries({ queryKey: ["events"] }),
       ]);
     },
-    onError: (error) => setActionError(error instanceof Error ? error.message : "Не удалось изменить событие."),
+    onError: (error) => setActionError(error instanceof Error ? tx(error.message) : tx("Не удалось изменить событие.")),
+  });
+  const suspension = useMutation({
+    mutationFn: ({ eventId, suspended, reason }: { eventId: number; suspended: boolean; reason?: string }) =>
+      setEventSuspended(eventId, suspended, reason),
+    onSuccess: async () => {
+      setSuspensionTarget(null);
+      setActionError("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["organizer-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+        queryClient.invalidateQueries({ queryKey: ["event"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-sales-events"] }),
+      ]);
+    },
+    onError: (error) => setActionError(error instanceof Error ? tx(error.message) : tx("Не удалось изменить статус модерации.")),
   });
   const retry = () => {
-    void profile.refetch();
+    if (!platformAdmin) void profile.refetch();
     void events.refetch();
   };
 
@@ -1197,32 +1265,38 @@ export function ManageOrganizerEventsPage() {
       }
       mutation.mutate({ eventId: event.id, action: "publish" });
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Не удалось проверить билеты события.");
+      setActionError(error instanceof Error ? tx(error.message) : tx("Не удалось проверить билеты события."));
     } finally {
       setCheckingTicketsForEvent(null);
     }
   };
 
   return (
-    <QueryState loading={profile.isLoading || events.isLoading} error={profile.error ?? events.error} onRetry={retry}>
+    <QueryState loading={(!platformAdmin && profile.isLoading) || events.isLoading} error={(platformAdmin ? null : profile.error) ?? events.error} onRetry={retry}>
+      {suspensionTarget && <EventSuspensionDialog
+        key={suspensionTarget.id}
+        event={suspensionTarget}
+        pending={suspension.isPending}
+        error={suspension.error}
+        onClose={() => { setSuspensionTarget(null); suspension.reset(); }}
+        onConfirm={reason => suspension.mutate({ eventId: suspensionTarget.id, suspended: true, reason })}
+      />}
       <Modal
         open={eventPendingPublish !== null}
         onClose={() => setEventPendingPublish(null)}
-        title="Опубликовать событие без билетов?"
+        title={tx("Опубликовать событие без билетов?")}
       >
-        <h2 className="text-xl font-bold">У события нет доступных билетов</h2>
+        <h2 className="text-xl font-bold">{tx("У события нет доступных билетов")}</h2>
         <p className="mt-3 text-sm text-muted">
-          {eventPendingPublish?.title ? `«${eventPendingPublish.title}» будет опубликовано` : "Событие будет опубликовано"} без доступных билетов. Посетители увидят событие, но пока не смогут купить билеты.
-        </p>
+          {eventPendingPublish?.title ? tx("«{0}» будет опубликовано", [eventPendingPublish.title]) : tx("Событие будет опубликовано")} {tx(" без доступных билетов. Посетители увидят событие, но пока не смогут купить билеты.")}</p>
         <div className="mt-5 flex flex-col gap-3">
           {eventPendingPublish && (
             <Button onClick={() => {
               const eventId = eventPendingPublish.id;
               setEventPendingPublish(null);
-              navigate(`/organizer/events/${eventId}/tickets`);
+              navigate(`${base}/events/${eventId}/tickets`);
             }}>
-              Сначала добавить билеты
-            </Button>
+              {tx("Сначала добавить билеты")}</Button>
           )}
           <Button
             variant="secondary"
@@ -1233,71 +1307,88 @@ export function ManageOrganizerEventsPage() {
               setEventPendingPublish(null);
             }}
           >
-            Всё равно опубликовать
-          </Button>
+            {tx("Всё равно опубликовать")}</Button>
           <button
             type="button"
             className="py-2 text-sm text-muted hover:text-black"
             onClick={() => setEventPendingPublish(null)}
           >
-            Отмена
-          </button>
+            {tx("Отмена")}</button>
         </div>
       </Modal>
-      <h2 className="mb-2 text-lg font-bold">Event Management</h2>
-      <p className="mb-5 text-sm text-muted">Публикуйте, снимайте с публикации или отменяйте свои события.</p>
-      {actionError && <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{actionError}</p>}
+      <h2 className="mb-2 text-lg font-bold">{tx("Управление мероприятиями")}</h2>
+      <p className="mb-5 text-sm text-muted">{platformAdmin ? tx("Управляйте статусами мероприятий всех организаторов.") : tx("Публикуйте, снимайте с публикации или отменяйте свои события.")}</p>
+      {actionError && <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{tx(actionError)}</p>}
       {(events.data?.content ?? []).length === 0 ? (
-        <OrganizerEventsList events={[]} emptyMessage="Нет событий для управления." />
+        <OrganizerEventsList events={[]} emptyMessage={tx("Нет событий для управления.")} />
       ) : (
         <div className="space-y-3">
           {(events.data?.content ?? []).map((event) => (
             <article key={event.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border p-4">
               <div className="min-w-0">
                 <h3 className="truncate font-semibold">{event.title}</h3>
-                <p className="mt-1 text-sm text-muted">{formatDate(event.startTime)} · ID: {event.id}</p>
+                <p className="mt-1 text-sm text-muted">{formatDate(event.startTime, locale)} · ID: {event.id}</p>
+                {event.suspensionReason && <p className="mt-1 text-sm text-red-700">{tx("Причина: ")}{event.suspensionReason}</p>}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={event.status} />
-                <Link to={`/organizer/events/${event.id}/tickets`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
-                  Билеты
-                </Link>
-                {event.status !== "CANCELLED" && (
-                  <Link to={`/organizer/events/${event.id}/edit`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
-                    Изменить
-                  </Link>
+                {platformAdmin && event.suspended && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">{tx("Приостановлено")}</span>}
+                {!platformAdmin && <Link to={`${base}/events/${event.id}/tickets`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
+                  {tx("Билеты")}</Link>}
+                {!platformAdmin && event.status !== "CANCELLED" && (
+                  <Link to={`${base}/events/${event.id}/edit`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
+                    {tx("Изменить")}</Link>
                 )}
-                {event.status === "DRAFT" && (
+                {platformAdmin && (event.suspended ? (
+                  <Button
+                    variant="secondary"
+                    disabled={suspension.isPending}
+                    onClick={() => suspension.mutate({ eventId: event.id, suspended: false })}
+                  >
+                    {suspension.isPending && suspension.variables?.eventId === event.id ? tx("Возобновляем…") : tx("Возобновить")}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    disabled={suspension.isPending || event.status === "CANCELLED"}
+                    title={event.status === "CANCELLED" ? tx("Отменённое событие нельзя приостановить") : undefined}
+                    onClick={() => { setActionError(""); suspension.reset(); setSuspensionTarget(event); }}
+                  >
+                    {tx("Приостановить")}</Button>
+                ))}
+                {!platformAdmin && event.status === "DRAFT" && (
                   <Button
                     disabled={mutation.isPending || checkingTicketsForEvent !== null}
                     onClick={() => void requestPublish(event)}
                   >
-                    {checkingTicketsForEvent === event.id ? "Проверяем билеты…" : "Опубликовать"}
+                    {checkingTicketsForEvent === event.id ? tx("Проверяем билеты…") : tx("Опубликовать")}
                   </Button>
                 )}
-                {event.status === "PUBLISHED" && (
-                  <Button variant="secondary" disabled={mutation.isPending} onClick={() => mutation.mutate({ eventId: event.id, action: "unpublish" })}>Снять</Button>
+                {!platformAdmin && event.status === "PUBLISHED" && (
+                  <Button variant="secondary" disabled={mutation.isPending} onClick={() => mutation.mutate({ eventId: event.id, action: "unpublish" })}>{tx("Снять")}</Button>
                 )}
-                {event.status !== "CANCELLED" && (
+                {!platformAdmin && event.status !== "CANCELLED" && (
                   <Button variant="secondary" disabled={mutation.isPending} onClick={() => {
-                    if (window.confirm(`Отменить событие «${event.title}»?`)) {
+                    if (window.confirm(tx("Отменить событие «{0}»?", [event.title]))) {
                       mutation.mutate({ eventId: event.id, action: "cancel" });
                     }
-                  }}>Отменить</Button>
+                  }}>{tx("Отменить")}</Button>
                 )}
               </div>
             </article>
           ))}
         </div>
       )}
+      <EventListPagination page={page} totalPages={events.data?.totalPages ?? 0} onChange={setPage} />
     </QueryState>
   );
 }
 
 function FormField({ label, children }: { label: string; children: ReactNode }) {
+  const { tx } = useLanguage();
   return (
     <label className="block space-y-1.5 text-sm font-medium">
-      <span>{label}</span>
+      <span>{tx(label)}</span>
       {children}
     </label>
   );
@@ -1305,8 +1396,8 @@ function FormField({ label, children }: { label: string; children: ReactNode }) 
 
 const fieldClass = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand";
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function formatDate(value: string, locale = "ru-RU") {
+  return formatDateTime(value, locale);
 }
 
 function toLocalInputValue(value?: string) {

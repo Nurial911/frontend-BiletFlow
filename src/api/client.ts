@@ -82,6 +82,7 @@ async function readErrorMessage(response: Response): Promise<string> {
   switch (response.status) {
     case 400: return "Проверьте введённые данные.";
     case 401: return "Нужно войти в аккаунт.";
+    case 402: return "Оплата отклонена. Заказ ожидает оплаты; можно повторить попытку.";
     case 403: return "Нет доступа.";
     case 404: return "Не найдено.";
     case 413: return "Файл превышает допустимый размер 5 МБ.";

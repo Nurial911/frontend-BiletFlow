@@ -1,6 +1,8 @@
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { usePublicEvents } from "../../hooks/useEvents";
 import { categoryLabel } from "../../lib/format";
+import { useLanguage } from "../../i18n/LanguageContext";
+import { catalogParams } from "../../lib/cities";
 
 // Category menu (Кино, Театры, Концерты…).
 // The backend has no list of categories yet, so we show the categories
@@ -10,6 +12,12 @@ export function CategoryNav() {
   const { pathname } = useLocation();
   const [params] = useSearchParams();
   const active = params.get("category");
+  const { t, locale } = useLanguage();
+  const categoryUrl = (category?: string) => {
+    const next = catalogParams(params);
+    if (category) next.set("category", category); else next.delete("category");
+    return `/?${next}`;
+  };
 
   if (pathname.startsWith("/organizer")) return null;
 
@@ -28,10 +36,10 @@ export function CategoryNav() {
   );
 
   return (
-    <nav aria-label="Категории" className="border-b">
+    <nav aria-label={t("categories")} className="border-b">
       <div className="mx-auto flex max-w-6xl gap-8 overflow-x-auto px-4">
-        {link("/", "Все", !active)}
-        {categories.map((c) => link(`/?category=${encodeURIComponent(c)}`, categoryLabel(c), active === c))}
+        {link(categoryUrl(), t("all"), !active)}
+        {categories.map((c) => link(categoryUrl(c), categoryLabel(c, locale), active === c))}
       </div>
     </nav>
   );

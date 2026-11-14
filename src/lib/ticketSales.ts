@@ -29,6 +29,6 @@ export function getEventTicketSaleState(
   return allUnsoldTicketsEnded ? "sales-ended" : null;
 }
 
-export function formatTicketSalesEnd(salesEnd: string): string {
-  return `${formatLongDate(salesEnd)} в ${formatTime(salesEnd)}`;
+export function formatTicketSalesEnd(salesEnd: string, locale = "ru-RU"): string {
+  return `${formatLongDate(salesEnd, locale)}${locale.startsWith("en") ? " at " : locale.startsWith("kk") ? ", " : " в "}${formatTime(salesEnd)}`;
 }

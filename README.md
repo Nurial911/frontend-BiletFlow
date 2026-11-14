@@ -9,10 +9,12 @@ React + TypeScript + Vite + Tailwind CSS. Talks to the team backend at
 | --- | --- | --- |
 | Home: banner, date strip, category menu, search, event grid | `/` | `GET /api/events`, `GET /api/events/{id}/ticket-types` |
 | Event page: details, venue, prices, ticket list | `/events/5` | `GET /api/events/{id}`, `GET /api/events/{id}/ticket-types` |
-| Order confirmation: order summary, free-ticket confirmation, simulated payment | `/orders/{id}` | `POST /api/orders`, `GET /api/orders/{id}`, `POST /api/orders/{id}/pay` |
+| Checkout: attendee name, promo quote, payment session, Halyk return and payment history | `/events/{id}`, `/orders/{id}`, `/orders/{id}/payment-result` | Orders, `/quote`, `/payment-session`, `/payment-check`, `/payments`; `/pay` only for free or SIMULATED orders |
 | Attendee account: own orders, tickets, ticket QR, pending order cancellation | `/account` | `GET`/`POST /api/orders`, `GET /api/tickets`, `GET /api/tickets/{ticketId}/qr`, `POST /api/orders/{orderId}/cancel` |
+| Account profile and settings: view account details and role, open role-specific sections, update email/password, or delete account | `/account/settings` | `GET /api/users/me`, organizer profile, `PUT /api/users/me/credentials`, `DELETE /api/users/me` |
 | Event staff check-in: assigned events, attendee search, scanning and check-in stats | `/staff` | `/api/check-in/events`, `/api/check-in/events/{eventId}/attendees`, `/scan`, `/stats`, `/{ticketId}/undo` |
 | Platform user administration and event moderation | `/admin/users` | `GET /api/users`, `PUT /api/users/{id}`, `PUT /api/users/{id}/role`, `DELETE /api/users/{id}`, `GET /api/events`, event suspend/unsuspend endpoints |
+| Platform dashboard: event moderation, staff, per-event sales, organizer verification, paid-sales moderation, escalated support | `/admin/dashboard` | Events/staff, per-event sales/orders, organizer verification requests, `/api/admin/paid-sales-activations`, support cases |
 | Login / registration window (email + password) | "Войти" button | `POST /api/auth/login`, `POST /api/auth/register`, `GET /api/users/me` |
 | Organizer dashboard: events, editable tickets, official sales/order reports, and staff assignment | `/organizer/events` | Organizer profile and event endpoints, `GET`/`POST /api/venues`, event CRUD and lifecycle endpoints, ticket type create/update/hide/unhide endpoints, `/api/organizer/sales/events`, `/api/organizer/events/{eventId}/sales`, `/api/organizer/events/{eventId}/orders`, `/api/events/{eventId}/staff`, poster endpoints |
 
@@ -74,13 +76,78 @@ updates, deletion, and event suspension/unsuspension with a reason. Frontend
 role guards only affect navigation and UX; authorization must be enforced by
 the backend on every protected endpoint.
 
-On the event page, selecting tickets creates an order through `POST /api/orders`
-and opens its confirmation screen. The screen loads the authoritative order
-summary from `GET /api/orders/{id}`. Confirming a zero-total order calls the
-`POST /api/orders/{id}/pay` endpoint without charging money; a paid order uses
-the same endpoint for simulated payment. Since the API has no separate
-free-order confirmation endpoint, the backend must allow zero-total pending
-orders to be finalized through this endpoint.
+On the event page, checkout uses `POST /api/orders/quote` for the server's price
+and discount before `POST /api/orders` reserves inventory. The optional
+`attendeeName` and canonical `promoCode` are sent on creation. Campaign links
+`/events/{id}?promo=<token>` resolve through `/promo?token=` (typed codes use
+`?code=`); a `/?promo=` token is retained in the tab until an event is opened.
+Free orders are normally PAID immediately. A legacy pending free order can
+still be confirmed through `/pay`.
+
+Paid checkout opens `/payment-session`. Only `provider: SIMULATED` calls
+`/pay`; HALYK loads the returned HTTPS `scriptUrl` and calls `halyk.pay(payment)`.
+The return page calls `/payment-check` immediately and polls while PENDING.
+The URL's success/failure hint never decides whether an order is paid.
+Failures remain visible, and users can retry or check the payment manually.
+The order page lists `/payments`, with demonstration records labelled clearly.
+Card details never pass through this frontend's API client.
+
+The account lists attendee names and downloads PDF tickets as authenticated
+Blobs. Check-in search supports name, email and code. Monetary amounts retain
+up to two fractional digits, including server-calculated promo discounts.
+
+## New account, organizer and administration flows
+
+- `/verify-email?token=...`, `/forgot-password`, `/reset-password?token=...`
+  implement the email token flows. Verification requires a deliberate button
+  click so opening a link does not consume it during a React remount. The
+  profile and shared verification notice support resending email. Forgot and
+  resend responses do not reveal whether an email has an account.
+- `/notifications` lists paginated notifications and marks one or all read.
+  The header polls the backend's `{unread}` counter every 30 seconds.
+- `/support`, `/support/new`, `/support/{caseId}` provide case creation,
+  filtering, polling and replies. Event, order and ticket pages link to
+  prefilled support forms. Organizers can also open PLATFORM cases.
+  Requesters have no staff actions; eligible handlers can assign and change
+  status, and organizers/admins can escalate. A requester reply reopens a
+  resolved case; handlers must change its status before replying.
+- `/organizer/events/{eventId}/campaigns` creates campaigns with percent/fixed
+  discounts, optional dates, redemption limits and ticket types. It lists
+  backend results, enables/disables campaigns and downloads their Campaign QR.
+  The campaign QR is explicitly distinguished from an admission QR.
+- `/account/settings` supports organizer verification requests and simulated
+  payout account registration. Only the IBAN's last four characters are
+  returned/stored by the backend; the full input is cleared after saving.
+- `/organizer/events/{eventId}/activation` shows the activation checklist,
+  simulated fee, explicit terms acceptance and activation. Unactivated or
+  suspended paid sales block paid ticket choice while preserving free tickets.
+- `/admin/dashboard/verification`, `/admin/dashboard/activations` and
+  `/admin/dashboard/support` handle organizer decisions, separate paid-sales
+  suspension/resumption and escalated cases. Suspending paid sales uses
+  `/activation/suspend`, whereas moderating the entire event uses `/suspend`.
+  The admin Sales screen selects an event and calls its sales/orders endpoints;
+  it never calls the organizer-only aggregate endpoint. Backend source confirms
+  admin staff management is allowed; event/ticket editing remains owner-only.
+
+All authorization must still be enforced by the backend. Signing out clears
+private query caches before another account is used. Real refunds, audit-log
+reading, user suspension, seat selection, calendar export and real payouts
+remain unavailable because the backend does not provide those operations.
+
+Backend configuration must set `APP_FRONTEND_URL` to this frontend's reachable
+base URL for email, Campaign QR and Halyk return links. Halyk credentials,
+payment mode, SMTP and activation fee are backend settings; no secrets belong
+in the frontend. Production hosting must route SPA paths (including the bank
+return and email routes) to `index.html` and proxy `/api` to the backend.
+
+## Verification
+
+Run `npm test` for API contract and React route-rendering regressions, then
+`npm run build` for TypeScript and the production build. Tests use mocked
+fetch and query data, covering provider routing (Halyk never calls `/pay`),
+decline/retry, payment status, PDF/QR binary responses, promo codes, auth,
+notifications, support roles and paid-sales moderation. They do not perform a
+real bank transaction, send email or write to the live backend.
 
 Events include `posterUrl`; the frontend displays it on event cards and event
 pages, and organizers can upload or remove posters using
@@ -102,9 +169,21 @@ the frontend role check must never be treated as a security boundary.
 
 Temporary workarounds until the backend adds them:
 
-- **Search, date and category filters** run in the browser (`src/pages/HomePage.tsx`).
+- **Search, date, city and category filters** run in the browser (`src/pages/HomePage.tsx`).
 - **Price on cards** comes from one ticket-types request per card (`src/components/events/EventCard.tsx`).
-- **City** and **KZ/RU/ENG** are shown but not working yet.
+- **City** is a URL filter (`?city=astana`, `?city=almaty`, etc.) inferred from
+  recognized city names in venue addresses. Unspecified/unrecognized addresses
+  stay visible under All cities and City not specified; the frontend does not
+  guess a city. A dedicated backend city field is needed for arbitrary cities.
+- **KZ/RU/ENG** apply across the catalog, event details, checkout, orders,
+  account settings, authentication, notifications, support, check-in and both
+  dashboards, including forms, statuses, dates and prices. Language is stored
+  in `bf_language` and can be shared using `?lang=kk|ru|en`. Event titles,
+  descriptions, venue details, attendee names and support messages remain as
+  authored. API enum values and submitted form data are not translated.
+  Shared UI phrases are in `src/lib/language.ts`; the page phrase catalog is
+  `src/i18n/messages.json`. Known local errors and parameterized validation
+  messages are localized; unknown server messages are preserved verbatim.
 
 ## Run it on your computer
 
@@ -120,6 +199,10 @@ Open http://localhost:5173. Stop the app with `Ctrl + C`.
 
 Every request to `/api/...` is forwarded to the backend by Vite
 (see `vite.config.ts`), so you don't need CORS settings during development.
+The development proxy rewrites `Origin` to the backend's own origin on the
+server-to-server hop, so using another local port does not trigger the backend's
+`Invalid CORS request` rejection. Backend authentication and production CORS
+settings remain enforced.
 
 ## If the page is empty
 
