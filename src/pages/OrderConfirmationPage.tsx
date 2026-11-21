@@ -16,6 +16,7 @@ const statusLabels: Record<OrderStatus, string> = {
   PAID: "Оплачен",
   CANCELLED: "Отменён",
   EXPIRED: "Истёк",
+  REFUNDED: "Возвращён",
 };
 
 export default function OrderConfirmationPage({ paymentResult = false }: { paymentResult?: boolean }) {
@@ -116,6 +117,9 @@ export default function OrderConfirmationPage({ paymentResult = false }: { payme
       )}
       {currentOrder.status === "CANCELLED" && (
         <p className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">{tx("Этот заказ отменён.")}</p>
+      )}
+      {currentOrder.status === "REFUNDED" && (
+        <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{tx("Организатор вернул деньги за этот заказ. Билеты больше не действуют.")}</p>
       )}
       {currentOrder.status === "EXPIRED" && (
         <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{tx("Срок действия заказа истёк. Создайте новый заказ.")}</p>

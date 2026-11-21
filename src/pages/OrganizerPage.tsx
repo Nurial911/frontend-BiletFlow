@@ -7,8 +7,10 @@ import {
   createTicketType,
   createVenue,
   deleteEventPoster,
+  duplicateEvent,
   getEvent,
   getEvents,
+  getMyEventsByPhase,
   getOrganizerEvents,
   getOrganizerProfile,
   getTicketTypes,
@@ -25,6 +27,7 @@ import type {
   CreateEventRequest,
   CreateTicketTypeRequest,
   Event,
+  EventPhase,
   EventStatus,
   TicketType,
   UpdateTicketTypeRequest,
@@ -110,7 +113,7 @@ function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyM
   );
 }
 
-function useOrganizerEvents(page = 0) {
+function useOrganizerEvents(page = 0, phase?: EventPhase) {
   const { user } = useAuth();
   const role = user?.role.trim().toUpperCase().replace(/^ROLE_/, "") ?? "";
   const platformAdmin = isPlatformAdmin(role);
@@ -120,10 +123,15 @@ function useOrganizerEvents(page = 0) {
     enabled: !platformAdmin,
   });
   const events = useQuery({
-    queryKey: ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page],
+    // The phase goes at the end only when a tab is chosen, so the "All" list keeps its old cache key
+    queryKey: phase
+      ? ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page, phase]
+      : ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page],
     queryFn: () => platformAdmin
       ? getEvents(page, EVENTS_PAGE_SIZE)
-      : getOrganizerEvents(profile.data!.userId, page, EVENTS_PAGE_SIZE),
+      : phase
+        ? getMyEventsByPhase(phase, page, EVENTS_PAGE_SIZE)
+        : getOrganizerEvents(profile.data!.userId, page, EVENTS_PAGE_SIZE),
     enabled: platformAdmin || !!profile.data?.userId,
   });
   return { profile, events, platformAdmin };
@@ -962,6 +970,16 @@ function OrganizerEventForm({
       <FormField label={tx("Описание")}>
         <textarea name="description" rows={4} defaultValue={event?.description ?? ""} className={fieldClass} />
       </FormField>
+      <FormField label={tx("Политика возврата")}>
+        <textarea
+          name="refundPolicy"
+          rows={3}
+          maxLength={2000}
+          defaultValue={event?.refundPolicy ?? ""}
+          className={fieldClass}
+          placeholder={tx("Например: полный возврат до 48 часов до начала события")}
+        />
+      </FormField>
       <FormField label={tx("Площадка")}>
         <select
           name="venueId"
@@ -1160,6 +1178,7 @@ function readEventForm(
   const request: CreateEventRequest = {
     title,
     description: String(form.get("description") ?? "").trim(),
+    refundPolicy: String(form.get("refundPolicy") ?? "").trim(),
     category,
     startTime: toApiLocalDateTime(startTime),
     venueId,
@@ -1193,6 +1212,7 @@ function buildEventUpdate(current: Event, form: CreateEventRequest) {
   const update: UpdateEventRequest = {};
   if (form.title !== current.title) update.title = form.title;
   if (form.description !== (current.description ?? "")) update.description = form.description;
+  if (form.refundPolicy !== (current.refundPolicy ?? "")) update.refundPolicy = form.refundPolicy;
   if (form.category !== current.category) update.category = form.category;
   if (form.startTime !== toApiLocalDateTime(toLocalInputValue(current.startTime))) update.startTime = form.startTime;
   if (form.endTime !== undefined && form.endTime !== toApiLocalDateTime(toLocalInputValue(current.endTime))) update.endTime = form.endTime;
@@ -1210,14 +1230,41 @@ function buildEventUpdate(current: Event, form: CreateEventRequest) {
   return update;
 }
 
+const PHASE_LABELS: Record<EventPhase, string> = {
+  UPCOMING: "Предстоящее",
+  ACTIVE: "Идёт сейчас",
+  COMPLETED: "Завершено",
+  CANCELLED: "Отменено",
+};
+
+const PHASE_TABS: { value: EventPhase | ""; label: string }[] = [
+  { value: "", label: "Все" },
+  { value: "UPCOMING", label: "Предстоящие" },
+  { value: "ACTIVE", label: "Идут сейчас" },
+  { value: "COMPLETED", label: "Завершённые" },
+  { value: "CANCELLED", label: "Отменённые" },
+];
+
 export function ManageOrganizerEventsPage() {
   const { tx, locale } = useLanguage();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const base = useDashboardBase();
   const [page, setPage] = useState(0);
-  const { profile, events, platformAdmin } = useOrganizerEvents(page);
+  // "" = all events; otherwise only the events in that phase (SRS 4.16)
+  const [phase, setPhase] = useState<EventPhase | "">("");
+  const { profile, events, platformAdmin } = useOrganizerEvents(page, phase || undefined);
   const [actionError, setActionError] = useState("");
+  const duplication = useMutation({
+    mutationFn: (eventId: number) => duplicateEvent(eventId),
+    onSuccess: async (copy) => {
+      setActionError("");
+      await queryClient.invalidateQueries({ queryKey: ["organizer-events"] });
+      // The copy is a draft: open it so the organizer can change the date and add tickets
+      navigate(`${base}/events/${copy.id}/edit`);
+    },
+    onError: (error) => setActionError(error instanceof Error ? tx(error.message) : tx("Не удалось скопировать событие.")),
+  });
   const [suspensionTarget, setSuspensionTarget] = useState<Event | null>(null);
   const [eventPendingPublish, setEventPendingPublish] = useState<Event | null>(null);
   const [checkingTicketsForEvent, setCheckingTicketsForEvent] = useState<number | null>(null);
@@ -1318,6 +1365,21 @@ export function ManageOrganizerEventsPage() {
       </Modal>
       <h2 className="mb-2 text-lg font-bold">{tx("Управление мероприятиями")}</h2>
       <p className="mb-5 text-sm text-muted">{platformAdmin ? tx("Управляйте статусами мероприятий всех организаторов.") : tx("Публикуйте, снимайте с публикации или отменяйте свои события.")}</p>
+      {!platformAdmin && (
+        <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label={tx("Фильтр по этапу")}>
+          {PHASE_TABS.map((tab) => (
+            <Button
+              key={tab.value || "ALL"}
+              role="tab"
+              aria-selected={phase === tab.value}
+              variant={phase === tab.value ? "primary" : "secondary"}
+              onClick={() => { setPhase(tab.value); setPage(0); }}
+            >
+              {tx(tab.label)}
+            </Button>
+          ))}
+        </div>
+      )}
       {actionError && <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{tx(actionError)}</p>}
       {(events.data?.content ?? []).length === 0 ? (
         <OrganizerEventsList events={[]} emptyMessage={tx("Нет событий для управления.")} />
@@ -1332,6 +1394,21 @@ export function ManageOrganizerEventsPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={event.status} />
+                {event.phase && event.phase !== "CANCELLED" && (
+                  <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">{tx(PHASE_LABELS[event.phase])}</span>
+                )}
+                <Link to={`${base}/events/${event.id}/history`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
+                  {tx("История")}</Link>
+                {!platformAdmin && !event.suspended && (
+                  <Button
+                    variant="secondary"
+                    disabled={duplication.isPending}
+                    title={tx("Новый черновик с теми же данными, без заказов и билетов")}
+                    onClick={() => duplication.mutate(event.id)}
+                  >
+                    {duplication.isPending && duplication.variables === event.id ? tx("Копируем…") : tx("Дублировать")}
+                  </Button>
+                )}
                 {platformAdmin && event.suspended && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">{tx("Приостановлено")}</span>}
                 {!platformAdmin && <Link to={`${base}/events/${event.id}/tickets`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">
                   {tx("Билеты")}</Link>}

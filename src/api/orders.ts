@@ -1,5 +1,5 @@
 import { api, apiBlob } from "./client";
-import type { Order, Page, Ticket } from "./types";
+import type { Order, Page, Refund, Ticket } from "./types";
 import type { OrderQuote, Payment, PaymentSession } from "./commerce";
 
 export interface OrderItemInput {
@@ -35,3 +35,11 @@ export const getMyTickets = (page = 0, size = 20) =>
 
 export const getTicketQr = (ticketId: number) => apiBlob(`/api/tickets/${ticketId}/qr`);
 export const getTicketPdf = (ticketId: number) => apiBlob(`/api/tickets/${ticketId}/pdf`);
+
+// POST /api/orders/{id}/refund — organizer of the event or platform admin.
+// Refunds a paid order in full, or cancels a free registration. The reason is shown to the buyer.
+export const refundOrder = (id: number, reason?: string) =>
+  api<Order>(`/api/orders/${id}/refund`, { method: "POST", body: reason ? { reason } : {} });
+
+// GET /api/orders/{id}/refunds — the buyer, the organizer or an admin
+export const getOrderRefunds = (id: number) => api<Refund[]>(`/api/orders/${id}/refunds`);

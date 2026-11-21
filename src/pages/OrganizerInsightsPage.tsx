@@ -8,6 +8,8 @@ import {
   removeEventStaff,
 } from "../api/checkIn";
 import { getEventOrders, getEventSales, getOrganizerSales } from "../api/sales";
+import { RefundOrderButton } from "../components/orders/RefundOrderButton";
+import { EventAttendancePanel } from "../components/analytics/EventAttendancePanel";
 import { Button, buttonClass } from "../components/ui/Button";
 import { formatLongDate, formatPrice, formatShortDate, formatDateTime } from "../lib/format";
 import type { EventSales, EventStaff } from "../api/types";
@@ -113,6 +115,7 @@ export function OrganizerSalesPage() {
               ) : eventSales.data ? (
                 <EventSalesDetail sales={eventSales.data} />
               ) : null}
+              <EventAttendancePanel key={selectedEventId} eventId={selectedEventId} />
               <div className="mt-6 border-t pt-4">
                 <h4 className="font-semibold">{tx("Заказы мероприятия")}</h4>
                 <form onSubmit={submitOrderSearch} className="mt-3 grid gap-2 sm:grid-cols-[1fr_180px_auto]">
@@ -123,6 +126,7 @@ export function OrganizerSalesPage() {
                     <option value="PAID">{tx("Оплачен")}</option>
                     <option value="CANCELLED">{tx("Отменён")}</option>
                     <option value="EXPIRED">{tx("Истёк")}</option>
+                    <option value="REFUNDED">{tx("Возвращён")}</option>
                   </select>
                   <Button type="submit">{tx("Найти")}</Button>
                 </form>
@@ -145,6 +149,7 @@ export function OrganizerSalesPage() {
                         <ul className="mt-2 text-xs">
                           {order.items.map((item) => <li key={item.ticketTypeId}>{item.ticketTypeName} × {item.quantity}</li>)}
                         </ul>
+                          {order.status === "PAID" && <RefundOrderButton orderId={order.id} totalAmount={order.totalAmount} />}
                       </article>
                     ))}
                     <OrdersPagination
@@ -279,14 +284,15 @@ export function AdminEventSalesPage() {
     {selected !== null && <>
       {sales.isLoading && <LoadingState />}{sales.error && <ErrorState error={sales.error} onRetry={() => void sales.refetch()} />}
       {sales.data && <><EventSalesCard row={sales.data} expanded={false} toggleLabel={tx("Обновить статистику")} onToggle={() => void sales.refetch()} /><EventSalesDetail sales={sales.data} /></>}
+      <EventAttendancePanel key={selected} eventId={selected} />
       <section className="space-y-3 rounded-xl border p-4"><h3 className="font-semibold">{tx("Заказы события")}</h3>
         <form onSubmit={e => { e.preventDefault(); setSearch(query.trim()); setOrderPage(0); }} className="flex flex-wrap gap-2">
           <input aria-label={tx("Поиск заказов по email")} value={query} onChange={e => setQuery(e.target.value)} placeholder={tx("Email покупателя")} className="min-w-40 flex-1 rounded-lg border p-2 text-sm" />
-          <select aria-label={tx("Статус заказа")} value={status} onChange={e => { setStatus(e.target.value); setOrderPage(0); }} className="rounded-lg border p-2 text-sm"><option value="">{tx("Все статусы")}</option><option value="PAID">{tx("Оплачен")}</option><option value="PENDING">{tx("Ожидает оплаты")}</option><option value="EXPIRED">{tx("Истёк")}</option><option value="CANCELLED">{tx("Отменён")}</option></select><Button type="submit">{tx("Найти")}</Button>
+          <select aria-label={tx("Статус заказа")} value={status} onChange={e => { setStatus(e.target.value); setOrderPage(0); }} className="rounded-lg border p-2 text-sm"><option value="">{tx("Все статусы")}</option><option value="PAID">{tx("Оплачен")}</option><option value="PENDING">{tx("Ожидает оплаты")}</option><option value="EXPIRED">{tx("Истёк")}</option><option value="CANCELLED">{tx("Отменён")}</option><option value="REFUNDED">{tx("Возвращён")}</option></select><Button type="submit">{tx("Найти")}</Button>
         </form>
         {orders.isLoading && <LoadingState />}{orders.error && <ErrorState error={orders.error} onRetry={() => void orders.refetch()} />}
         {orders.data?.content.length === 0 && <p className="text-sm">{tx("Заказов нет.")}</p>}
-        {orders.data?.content.map(order => <article key={order.id} className="rounded-lg bg-surface p-3 text-sm"><p className="font-semibold">№{order.id} · {order.buyerEmail}</p>{order.attendeeName && <p>{order.attendeeName}</p>}<p>{statusLabel(order.status)} · {formatPrice(order.totalAmount, locale)} {tx(" · Билетов: ")}{order.ticketCount}</p></article>)}
+        {orders.data?.content.map(order => <article key={order.id} className="rounded-lg bg-surface p-3 text-sm"><p className="font-semibold">№{order.id} · {order.buyerEmail}</p>{order.attendeeName && <p>{order.attendeeName}</p>}<p>{statusLabel(order.status)} · {formatPrice(order.totalAmount, locale)} {tx(" · Билетов: ")}{order.ticketCount}</p> {order.status === "PAID" && <RefundOrderButton orderId={order.id} totalAmount={order.totalAmount} />}</article>)}
         <OrdersPagination page={orderPage} totalPages={orders.data?.totalPages ?? 0} onChange={setOrderPage} />
       </section>
     </>}

@@ -131,6 +131,61 @@ export interface OrganizerProfile {
 }
 
 export type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED";
+
+// Where the event is in time (SRS 4.16), calculated by the backend from the clock and the status
+export type EventPhase = "UPCOMING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+
+// GET /api/organizer/events/{eventId}/attendance (SRS 4.15)
+// Ticket holders = VALID + USED tickets; refunded and cancelled tickets don't count.
+export interface TicketTypeAttendance {
+  ticketTypeId: number;
+  name: string;
+  hidden: boolean;
+  ticketHolders: number;
+  checkedIn: number;
+  absent: number;
+  checkInRate: number; // percent, one decimal
+}
+
+export interface ArrivalInterval {
+  from: string; // inclusive
+  to: string; // exclusive
+  checkedIn: number;
+  cumulative: number;
+}
+
+export interface EventAttendance {
+  eventId: number;
+  eventTitle: string;
+  phase: EventPhase;
+  startTime: string;
+  endTime?: string | null;
+  ticketTypeId?: number | null; // the filter applied, null = all ticket types
+  ticketHolders: number;
+  checkedIn: number;
+  absent: number; // "not arrived yet" while the event runs, absent once it is over
+  checkInRate: number;
+  undoneCheckIns: number;
+  firstArrival?: string | null;
+  lastArrival?: string | null;
+  intervalMinutes: number;
+  ticketTypes: TicketTypeAttendance[];
+  arrivals: ArrivalInterval[]; // only intervals with arrivals, oldest first
+}
+
+// GET /api/organizer/events/{eventId}/history — one line of the activity timeline
+export interface EventHistoryEntry {
+  id: number;
+  timestamp: string;
+  actorId?: number | null;
+  actorName?: string | null; // admins are shown as "BiletFlow Support"
+  actorEmail?: string | null;
+  actorRole?: string | null;
+  action: string; // e.g. EVENT_PUBLISHED, ORDER_REFUNDED, TICKET_CHECKED_IN
+  entityType: string; // EVENT, TICKET_TYPE, ORDER, PAYMENT, TICKET, PROMO_CAMPAIGN, ...
+  entityId?: number | null;
+  description: string;
+}
 export type Visibility = "PUBLIC" | "UNLISTED" | "PRIVATE";
 
 export interface CreateEventRequest {
@@ -144,6 +199,7 @@ export interface CreateEventRequest {
   capacity?: number;
   visibilityStatus: Visibility;
   venueId: number;
+  refundPolicy?: string;
 }
 
 export interface UpdateEventRequest {
@@ -157,6 +213,7 @@ export interface UpdateEventRequest {
   capacity?: number;
   visibilityStatus?: Visibility;
   venueId?: number;
+  refundPolicy?: string;
 }
 
 export interface Event {
@@ -164,6 +221,8 @@ export interface Event {
   id: number;
   title: string;
   description?: string;
+  refundPolicy?: string | null;
+  phase?: EventPhase;
   category: string;
   startTime: string;
   endTime?: string;
@@ -206,7 +265,7 @@ export interface Page<T> {
   last: boolean;
   empty: boolean;
 }
-export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED" | "REFUNDED";
 
 export interface OrderItem {
   ticketTypeId: number;
@@ -231,7 +290,24 @@ export interface Order {
   items: OrderItem[];
 }
 
-export type TicketStatus = "VALID" | "USED" | "CANCELLED";
+export type TicketStatus = "VALID" | "USED" | "CANCELLED" | "REFUNDED";
+
+// GET /api/orders/{orderId}/refunds — one entry per refund attempt
+export type RefundStatus = "PENDING" | "SUCCEEDED" | "FAILED";
+
+export interface Refund {
+  id: number;
+  orderId: number;
+  status: RefundStatus;
+  amount: number;
+  reference: string;
+  provider: string; // SIMULATED or HALYK
+  simulated: boolean;
+  reason?: string | null;
+  failureReason?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+}
 
 export interface Ticket {
   attendeeName?: string;
