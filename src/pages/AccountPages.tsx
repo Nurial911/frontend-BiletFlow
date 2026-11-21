@@ -9,7 +9,7 @@ import {
   scanEventTicket,
   undoEventCheckIn,
 } from "../api/checkIn";
-import { cancelOrder, getMyOrders, getMyTickets, getTicketQr, getTicketPdf } from "../api/orders";
+import { cancelOrder, getMyOrders, getMyTickets, getOrderRefunds, getTicketQr, getTicketPdf } from "../api/orders";
 import { downloadBlob } from "../lib/download";
 import { OrganizerProfileSettings } from "./CommercePages";
 import { getEvents, getOrganizerProfile, setEventSuspended } from "../api/events";
@@ -386,10 +386,30 @@ function OrderCard({ order, pending, error, onCancel }: { order: Order; pending:
         {order.items.map((item) => <li key={item.ticketTypeId}>{item.ticketTypeName} × {item.quantity}</li>)}
       </ul>
       <p className="mt-3 text-sm">{tx("Статус: ")}{statusLabel(order.status)}</p>
+            {order.status === "REFUNDED" && <OrderRefundInfo orderId={order.id} />}
       <Link to={`/orders/${order.id}`} className="mt-3 inline-block text-sm font-semibold underline">{tx("Открыть заказ")}</Link>
       {order.status === "PENDING" && <Button variant="secondary" className="ml-3" disabled={pending} onClick={onCancel}>{tx("Отменить заказ")}</Button>}
       {error != null && <ApiErrorMessage error={error} />}
     </article>
+  );
+}
+// Shown on a refunded order: how much came back, when, and the organizer's reason.
+function OrderRefundInfo({ orderId }: { orderId: number }) {
+  const { tx, locale, statusLabel } = useLanguage();
+  const refunds = useQuery({ queryKey: ["order-refunds", orderId], queryFn: () => getOrderRefunds(orderId) });
+  // The newest attempt is the one that counts (a failed attempt can be retried)
+  const refund = refunds.data?.[refunds.data.length - 1];
+  if (!refund) return null;
+  return (
+    <div className="mt-2 rounded-lg bg-surface p-3 text-sm">
+      <p>
+        {tx("Возврат: ")}<strong>{formatPrice(refund.amount, locale)}</strong> · {statusLabel(refund.status)}
+        {refund.completedAt ? ` · ${formatDateTime(refund.completedAt, locale)}` : ""}
+      </p>
+      {refund.reason && <p className="mt-1 text-muted">{tx("Причина: ")}{refund.reason}</p>}
+      {refund.failureReason && <p className="mt-1 text-red-700">{refund.failureReason}</p>}
+      {refund.simulated && <p className="mt-1 text-xs text-muted">{tx("Демонстрационный возврат: реальные деньги не переводились.")}</p>}
+    </div>
   );
 }
 
@@ -430,7 +450,7 @@ function MyTicketCard({ ticket }: { ticket: Ticket }) {
       <Button variant="secondary" className="mt-3" onClick={() => setShowQr((value) => !value)}>
         {showQr ? tx("Скрыть QR-код") : tx("Показать QR-код")}
       </Button>
-      <Button variant="secondary" className="mt-3 ml-2" disabled={pdf.isPending || ticket.status === "CANCELLED"} onClick={() => pdf.mutate()}>{pdf.isPending ? tx("Загрузка…") : tx("Скачать билет PDF")}</Button>
+      <Button variant="secondary" className="mt-3 ml-2" disabled={pdf.isPending || ticket.status === "CANCELLED" || ticket.status === "REFUNDED"} onClick={() => pdf.mutate()}>{pdf.isPending ? tx("Загрузка…") : tx("Скачать билет PDF")}</Button>
       {pdf.error && <ApiErrorMessage error={pdf.error} />}
       <Link to={`/support/new?ticketId=${ticket.id}`} className="mt-3 block text-sm underline">{tx("Помощь с билетом")}</Link>
       {showQr && qr.isLoading && <p className="mt-3 text-sm text-muted">{tx("Загружаем QR-код…")}</p>}
