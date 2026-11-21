@@ -9,6 +9,7 @@ import {
 } from "../api/checkIn";
 import { getEventOrders, getEventSales, getOrganizerSales } from "../api/sales";
 import { RefundOrderButton } from "../components/orders/RefundOrderButton";
+import { EventAttendancePanel } from "../components/analytics/EventAttendancePanel";
 import { Button, buttonClass } from "../components/ui/Button";
 import { formatLongDate, formatPrice, formatShortDate, formatDateTime } from "../lib/format";
 import type { EventSales, EventStaff } from "../api/types";
@@ -114,6 +115,7 @@ export function OrganizerSalesPage() {
               ) : eventSales.data ? (
                 <EventSalesDetail sales={eventSales.data} />
               ) : null}
+              <EventAttendancePanel key={selectedEventId} eventId={selectedEventId} />
               <div className="mt-6 border-t pt-4">
                 <h4 className="font-semibold">{tx("Заказы мероприятия")}</h4>
                 <form onSubmit={submitOrderSearch} className="mt-3 grid gap-2 sm:grid-cols-[1fr_180px_auto]">
@@ -282,6 +284,7 @@ export function AdminEventSalesPage() {
     {selected !== null && <>
       {sales.isLoading && <LoadingState />}{sales.error && <ErrorState error={sales.error} onRetry={() => void sales.refetch()} />}
       {sales.data && <><EventSalesCard row={sales.data} expanded={false} toggleLabel={tx("Обновить статистику")} onToggle={() => void sales.refetch()} /><EventSalesDetail sales={sales.data} /></>}
+      <EventAttendancePanel key={selected} eventId={selected} />
       <section className="space-y-3 rounded-xl border p-4"><h3 className="font-semibold">{tx("Заказы события")}</h3>
         <form onSubmit={e => { e.preventDefault(); setSearch(query.trim()); setOrderPage(0); }} className="flex flex-wrap gap-2">
           <input aria-label={tx("Поиск заказов по email")} value={query} onChange={e => setQuery(e.target.value)} placeholder={tx("Email покупателя")} className="min-w-40 flex-1 rounded-lg border p-2 text-sm" />

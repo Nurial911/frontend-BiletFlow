@@ -28,6 +28,8 @@ export function RefundOrderButton({ orderId, totalAmount }: Props) {
       await queryClient.invalidateQueries({ queryKey: ["organizer-event-orders"] });
       await queryClient.invalidateQueries({ queryKey: ["organizer-sales-detail"] });
       await queryClient.invalidateQueries({ queryKey: ["organizer-sales-summary"] });
+      // Refunded tickets stop counting as ticket holders
+      await queryClient.invalidateQueries({ queryKey: ["event-attendance"] });
     },
   });
 

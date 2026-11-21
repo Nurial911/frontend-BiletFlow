@@ -135,6 +135,44 @@ export type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED";
 // Where the event is in time (SRS 4.16), calculated by the backend from the clock and the status
 export type EventPhase = "UPCOMING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
 
+// GET /api/organizer/events/{eventId}/attendance (SRS 4.15)
+// Ticket holders = VALID + USED tickets; refunded and cancelled tickets don't count.
+export interface TicketTypeAttendance {
+  ticketTypeId: number;
+  name: string;
+  hidden: boolean;
+  ticketHolders: number;
+  checkedIn: number;
+  absent: number;
+  checkInRate: number; // percent, one decimal
+}
+
+export interface ArrivalInterval {
+  from: string; // inclusive
+  to: string; // exclusive
+  checkedIn: number;
+  cumulative: number;
+}
+
+export interface EventAttendance {
+  eventId: number;
+  eventTitle: string;
+  phase: EventPhase;
+  startTime: string;
+  endTime?: string | null;
+  ticketTypeId?: number | null; // the filter applied, null = all ticket types
+  ticketHolders: number;
+  checkedIn: number;
+  absent: number; // "not arrived yet" while the event runs, absent once it is over
+  checkInRate: number;
+  undoneCheckIns: number;
+  firstArrival?: string | null;
+  lastArrival?: string | null;
+  intervalMinutes: number;
+  ticketTypes: TicketTypeAttendance[];
+  arrivals: ArrivalInterval[]; // only intervals with arrivals, oldest first
+}
+
 // GET /api/organizer/events/{eventId}/history — one line of the activity timeline
 export interface EventHistoryEntry {
   id: number;
