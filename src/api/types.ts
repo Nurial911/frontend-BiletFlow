@@ -144,6 +144,7 @@ export interface CreateEventRequest {
   capacity?: number;
   visibilityStatus: Visibility;
   venueId: number;
+  refundPolicy?: string;
 }
 
 export interface UpdateEventRequest {
@@ -157,6 +158,7 @@ export interface UpdateEventRequest {
   capacity?: number;
   visibilityStatus?: Visibility;
   venueId?: number;
+  refundPolicy?: string;
 }
 
 export interface Event {
@@ -164,6 +166,7 @@ export interface Event {
   id: number;
   title: string;
   description?: string;
+  refundPolicy?: string | null;
   category: string;
   startTime: string;
   endTime?: string;
@@ -206,7 +209,7 @@ export interface Page<T> {
   last: boolean;
   empty: boolean;
 }
-export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED" | "REFUNDED";
 
 export interface OrderItem {
   ticketTypeId: number;
@@ -231,7 +234,24 @@ export interface Order {
   items: OrderItem[];
 }
 
-export type TicketStatus = "VALID" | "USED" | "CANCELLED";
+export type TicketStatus = "VALID" | "USED" | "CANCELLED" | "REFUNDED";
+
+// GET /api/orders/{orderId}/refunds — one entry per refund attempt
+export type RefundStatus = "PENDING" | "SUCCEEDED" | "FAILED";
+
+export interface Refund {
+  id: number;
+  orderId: number;
+  status: RefundStatus;
+  amount: number;
+  reference: string;
+  provider: string; // SIMULATED or HALYK
+  simulated: boolean;
+  reason?: string | null;
+  failureReason?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+}
 
 export interface Ticket {
   attendeeName?: string;

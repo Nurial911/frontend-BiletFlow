@@ -16,6 +16,7 @@ const statusLabels: Record<OrderStatus, string> = {
   PAID: "Оплачен",
   CANCELLED: "Отменён",
   EXPIRED: "Истёк",
+  REFUNDED: "Возвращён",
 };
 
 export default function OrderConfirmationPage({ paymentResult = false }: { paymentResult?: boolean }) {
