@@ -131,6 +131,23 @@ export interface OrganizerProfile {
 }
 
 export type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED";
+
+// Where the event is in time (SRS 4.16), calculated by the backend from the clock and the status
+export type EventPhase = "UPCOMING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+
+// GET /api/organizer/events/{eventId}/history — one line of the activity timeline
+export interface EventHistoryEntry {
+  id: number;
+  timestamp: string;
+  actorId?: number | null;
+  actorName?: string | null; // admins are shown as "BiletFlow Support"
+  actorEmail?: string | null;
+  actorRole?: string | null;
+  action: string; // e.g. EVENT_PUBLISHED, ORDER_REFUNDED, TICKET_CHECKED_IN
+  entityType: string; // EVENT, TICKET_TYPE, ORDER, PAYMENT, TICKET, PROMO_CAMPAIGN, ...
+  entityId?: number | null;
+  description: string;
+}
 export type Visibility = "PUBLIC" | "UNLISTED" | "PRIVATE";
 
 export interface CreateEventRequest {
@@ -167,6 +184,7 @@ export interface Event {
   title: string;
   description?: string;
   refundPolicy?: string | null;
+  phase?: EventPhase;
   category: string;
   startTime: string;
   endTime?: string;

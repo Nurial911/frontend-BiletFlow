@@ -4,6 +4,8 @@ import type {
   CreateTicketTypeRequest,
   CreateVenueRequest,
   Event,
+  EventHistoryEntry,
+  EventPhase,
   OrganizerProfile,
   Page,
   TicketType,
@@ -72,3 +74,29 @@ export const setEventSuspended = (eventId: number, suspended: boolean, reason = 
     method: "POST",
     ...(suspended ? { body: { reason } } : {}),
   });
+
+// GET /api/organizer/events?phase=… — the organizer's own events in one phase (SRS 4.16)
+export const getMyEventsByPhase = (phase: EventPhase, page = 0, size = 100) =>
+  api<Page<Event>>(`/api/organizer/events?phase=${phase}&page=${page}&size=${size}`);
+
+// POST /api/events/{id}/duplicate — a new DRAFT with the same details, venue, poster and refund policy.
+// Orders, tickets, payments, check-ins and support cases are NOT copied. Ticket types are not copied either.
+export const duplicateEvent = (eventId: number) =>
+  api<Event>(`/api/events/${eventId}/duplicate`, { method: "POST" });
+
+export interface EventHistoryFilter {
+  page?: number;
+  size?: number;
+  from?: string; // yyyy-MM-dd, inclusive
+  to?: string; // yyyy-MM-dd, inclusive
+  entityType?: string;
+}
+
+// GET /api/organizer/events/{eventId}/history — newest first, organizer of the event or platform admin
+export const getEventHistory = (eventId: number, filter: EventHistoryFilter = {}) => {
+  const params = new URLSearchParams({ page: String(filter.page ?? 0), size: String(filter.size ?? 30) });
+  if (filter.from) params.set("from", filter.from);
+  if (filter.to) params.set("to", filter.to);
+  if (filter.entityType) params.set("entityType", filter.entityType);
+  return api<Page<EventHistoryEntry>>(`/api/organizer/events/${eventId}/history?${params}`);
+};

@@ -9,6 +9,7 @@ import { RoleGuard } from "./pages/RoleGuard";
 import NotFoundPage from "./pages/NotFoundPage";
 import { AuthActionPage } from "./pages/AuthPages";
 import NotificationsPage from "./pages/NotificationsPage";
+import EventHistoryPage from "./pages/EventHistoryPage";
 import { NewSupportCasePage, SupportCasePage, SupportListPage } from "./pages/SupportPages";
 import { ActivationPage, AdminActivationsPage, AdminVerificationPage, CampaignsPage } from "./pages/CommercePages";
 import {
@@ -45,6 +46,7 @@ export default function App() {
           <Route index element={<Navigate to="events" replace />} />
           <Route path="events" element={<MyOrganizerEventsPage />} />
           <Route path="events/:eventId/staff" element={<OrganizerEventStaffPage />} />
+          <Route path="events/:eventId/history" element={<EventHistoryPage />} />
           <Route path="activations" element={<AdminActivationsPage />} />
           <Route path="verification" element={<AdminVerificationPage />} />
           <Route path="support" element={<SupportListPage escalatedOnly />} />
@@ -59,6 +61,7 @@ export default function App() {
             <Route path="events/:eventId/edit" element={<EditOrganizerEventPage />} />
             <Route path="events/:eventId/staff" element={<OrganizerEventStaffPage />} />
             <Route path="events/:eventId/campaigns" element={<CampaignsPage />} />
+            <Route path="events/:eventId/history" element={<EventHistoryPage />} />
             <Route path="events/:eventId/activation" element={<ActivationPage />} />
             <Route path="create" element={<CreateOrganizerEventPage />} />
             <Route path="manage" element={<ManageOrganizerEventsPage />} />
