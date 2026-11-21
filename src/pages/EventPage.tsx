@@ -126,6 +126,13 @@ export default function EventPage() {
         </section>
       )}
 
+      {event.refundPolicy && (
+        <section className="mt-6 max-w-3xl">
+          <h2 className="text-lg font-bold">{tx("Политика возврата")}</h2>
+          <div className="mt-2 whitespace-pre-line rounded-xl bg-surface p-4 text-sm">{event.refundPolicy}</div>
+        </section>
+      )}
+
       {ticketsNotRequired && (
         <p className="mt-10 max-w-3xl rounded-xl bg-green-50 p-4 text-sm font-medium text-green-800">
           {tx("Билеты не требуются для этого события.")}</p>

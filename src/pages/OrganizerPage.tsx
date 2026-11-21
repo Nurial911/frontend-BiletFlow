@@ -962,6 +962,16 @@ function OrganizerEventForm({
       <FormField label={tx("Описание")}>
         <textarea name="description" rows={4} defaultValue={event?.description ?? ""} className={fieldClass} />
       </FormField>
+      <FormField label={tx("Политика возврата")}>
+        <textarea
+          name="refundPolicy"
+          rows={3}
+          maxLength={2000}
+          defaultValue={event?.refundPolicy ?? ""}
+          className={fieldClass}
+          placeholder={tx("Например: полный возврат до 48 часов до начала события")}
+        />
+      </FormField>
       <FormField label={tx("Площадка")}>
         <select
           name="venueId"
@@ -1160,6 +1170,7 @@ function readEventForm(
   const request: CreateEventRequest = {
     title,
     description: String(form.get("description") ?? "").trim(),
+    refundPolicy: String(form.get("refundPolicy") ?? "").trim(),
     category,
     startTime: toApiLocalDateTime(startTime),
     venueId,
@@ -1193,6 +1204,7 @@ function buildEventUpdate(current: Event, form: CreateEventRequest) {
   const update: UpdateEventRequest = {};
   if (form.title !== current.title) update.title = form.title;
   if (form.description !== (current.description ?? "")) update.description = form.description;
+  if (form.refundPolicy !== (current.refundPolicy ?? "")) update.refundPolicy = form.refundPolicy;
   if (form.category !== current.category) update.category = form.category;
   if (form.startTime !== toApiLocalDateTime(toLocalInputValue(current.startTime))) update.startTime = form.startTime;
   if (form.endTime !== undefined && form.endTime !== toApiLocalDateTime(toLocalInputValue(current.endTime))) update.endTime = form.endTime;
