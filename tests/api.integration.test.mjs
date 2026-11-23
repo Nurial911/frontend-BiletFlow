@@ -20,9 +20,9 @@ const bundle = await build({ stdin: { contents: `
   export * as pageLanguage from './src/i18n/translateText';
   export * as client from './src/api/client';
   export { startOrderPayment } from './src/lib/checkout';
-  export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } from './src/lib/format';
+  export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } from './src/lib/format';
 `, resolveDir: process.cwd() }, bundle: true, platform: "node", format: "esm", write: false });
-const { checkIn, orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { checkIn, orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 let expected;
 let requests;
@@ -177,6 +177,11 @@ test("checkout sends attendee name and the server promo code; quote never create
 });
 test("server discount amounts retain fractional tenge", () => {
   assert.equal(formatPrice(999.5), "999,5 ₸");
+});
+test("form date-time values are read as Kazakhstan time whatever the browser time zone", () => {
+  assert.equal(almatyTimestamp("2026-12-10T18:00"), Date.UTC(2026, 11, 10, 13, 0));
+  assert.equal(almatyTimestamp("2026-12-10T18:00:00"), Date.UTC(2026, 11, 10, 13, 0));
+  assert.equal(almatyTimestamp("2027-01-01T00:30"), Date.UTC(2026, 11, 31, 19, 30));
 });
 test("daily sales dates and event timestamps both use Kazakhstan time", () => {
   assert.equal(parseDate("2026-11-13").toISOString(), "2026-11-12T19:00:00.000Z");

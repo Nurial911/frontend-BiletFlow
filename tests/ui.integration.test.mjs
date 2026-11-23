@@ -19,6 +19,7 @@ await build({ stdin: { contents: `
   import { SeatMapPicker } from './src/components/events/SeatMapPicker';
   import { OrderItemsList } from './src/components/orders/OrderItemsList';
   import { CheckInResultCard } from './src/components/checkin/CheckInResultCard';
+  export { readEventForm } from './src/pages/OrganizerPage';
   export async function renderSeatMap(map, seats) {
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     client.setQueryData(['seat-section', 7, 1], { section: map.sections[0], seats });
@@ -58,7 +59,7 @@ await build({ stdin: { contents: `
     return html;
   }
 `, resolveDir: process.cwd() }, bundle: true, packages: "external", platform: "node", format: "esm", outfile });
-const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems, renderCheckInResult } = await import(pathToFileURL(outfile));
+const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems, renderCheckInResult, readEventForm } = await import(pathToFileURL(outfile));
 const attendee = { id: 2, email: "attendee@test.invalid", role: "ATTENDEE", verificationStatus: true };
 const organizer = { ...attendee, id: 1, role: "ORGANIZER" };
 const admin = { ...attendee, id: 9, role: "PLATFORM_ADMIN" };
@@ -349,6 +350,18 @@ test("editing a legacy event without a city keeps its existing venue available",
   assert.match(html, /value="unknown" selected=""/);
   assert.match(html, /Legacy hall/);
   assert.match(html, /The current venue has no specified city/);
+});
+test("event form times are checked in Kazakhstan time, not the browser's time zone", () => {
+  const almatyInput = minutesFromNow => new Date(Date.now() + 5 * 3600_000 + minutesFromNow * 60_000).toISOString().slice(0, 16);
+  const form = fields => {
+    const data = new FormData();
+    for (const [key, value] of Object.entries({ title: "Jazz", category: "Music", venueId: "1", visibilityStatus: "PUBLIC", ...fields })) data.set(key, value);
+    return data;
+  };
+  assert.throws(() => readEventForm(form({ startTime: almatyInput(-30) })), /в будущем/);
+  assert.equal(readEventForm(form({ startTime: almatyInput(30) })).startTime, `${almatyInput(30)}:00`);
+  assert.throws(() => readEventForm(form({ startTime: "2027-12-10T18:00", endTime: "2027-12-10T18:00" })), /позже начала/);
+  assert.throws(() => readEventForm(form({ startTime: "2027-12-10T18:00", registrationClosingTime: "2027-12-10T18:30" })), /до начала события/);
 });
 test("event category is chosen from the agreed list in every language", async () => {
   const html = await renderRoute("/organizer/create?lang=kk", organizer, translatedPageSeeds);

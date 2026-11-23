@@ -21,6 +21,12 @@ export function parseDate(iso: string): Date {
   return new Date(hasZone ? iso : `${iso}+05:00`);
 }
 
+// Milliseconds for a form value ("2026-12-10T18:00") or a backend LocalDateTime,
+// read as Kazakhstan time whatever time zone the browser is in.
+export function almatyTimestamp(value: string): number {
+  return parseDate(value).getTime();
+}
+
 // "11 сентября 2026"
 export function formatLongDate(iso: string, locale = "ru-RU"): string {
   if (locale.startsWith("kk")) return kazakhDate(iso, true);
