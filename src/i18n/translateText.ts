@@ -3,7 +3,7 @@ import type { Language } from "../lib/language";
 
 const catalog: Record<string, readonly string[]> = messages;
 const sourceByTranslation = new Map<string, string>();
-const templateRules: { source: string; pattern: RegExp; indices: number[] }[] = [];
+const templateRules: { source: string; pattern: RegExp; indices: number[]; fixedLength: number }[] = [];
 for (const [source, variants] of Object.entries(catalog)) {
   for (const variant of variants) if (!sourceByTranslation.has(variant)) sourceByTranslation.set(variant, source);
   for (const variant of [source, ...variants]) {
@@ -13,7 +13,7 @@ for (const [source, variants] of Object.entries(catalog)) {
       if (/^\{\d+\}$/.test(part)) { indices.push(Number(part.slice(1, -1))); return "(.*?)"; }
       return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }).join("");
-    templateRules.push({ source, pattern: new RegExp(`^${pattern}$`, "u"), indices });
+    templateRules.push({ source, pattern: new RegExp(`^${pattern}$`, "u"), indices, fixedLength: variant.replace(/\{\d+\}/g, "").length });
   }
 }
 
@@ -25,14 +25,19 @@ export function translateText(language: Language, source: string | number | null
   let sourceKey = catalog[key] ? key : sourceByTranslation.get(key);
   let substitutions = values;
   if (!sourceKey && values.length === 0) {
+    // When several templates match, the one with the most fixed text wins, so a short
+    // template such as "{0} at {1}" cannot take over a longer server message containing " at ".
+    let best: { rule: (typeof templateRules)[number]; match: RegExpExecArray } | undefined;
     for (const rule of templateRules) {
       const match = rule.pattern.exec(key);
-      if (!match) continue;
+      if (match && (!best || rule.fixedLength > best.rule.fixedLength)) best = { rule, match };
+    }
+    if (best) {
+      const { rule, match } = best;
       const captured: string[] = [];
       rule.indices.forEach((index, position) => { captured[index] = match[position + 1]; });
       sourceKey = rule.source;
       substitutions = captured;
-      break;
     }
   }
   const translated = sourceKey ? language === "ru" ? sourceKey : catalog[sourceKey]?.[language === "en" ? 0 : 1] : undefined;
