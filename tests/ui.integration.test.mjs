@@ -461,3 +461,17 @@ test("staff can check in a valid ticket found by search and undo only a used one
   assert.ok(html.indexOf("valid@test.invalid") < html.indexOf("Отметить проход"));
   assert.ok(html.indexOf("used@test.invalid") < html.indexOf("Отменить check-in"));
 });
+
+test("cancelled and refunded tickets show no QR code and are marked invalid for entry", async () => {
+  const base = { eventTitle: "Jazz", ticketTypeName: "Standard", attendeeName: "Алия", attendeeEmail: attendee.email, orderId: 42, eventId: 7 };
+  const html = await renderRoute("/account", attendee, [[["my-orders", 0], page([])], [["my-tickets", 0], page([
+    { ...base, id: 5, status: "VALID" },
+    { ...base, id: 6, status: "CANCELLED" },
+    { ...base, id: 7, status: "REFUNDED" },
+  ])]]);
+  assert.equal((html.match(/Показать QR-код/g) ?? []).length, 1);
+  assert.equal((html.match(/data-qr-invalid="true"/g) ?? []).length, 2);
+  assert.equal((html.match(/QR-код недействителен для входа\./g) ?? []).length, 2);
+  assert.match(html, /Билет отменён/);
+  assert.match(html, /Билет возвращён/);
+});
