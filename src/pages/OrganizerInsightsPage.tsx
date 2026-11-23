@@ -11,6 +11,7 @@ import {
 import { getEventOrders, getEventSales, getOrganizerSales } from "../api/sales";
 import { RefundOrderButton } from "../components/orders/RefundOrderButton";
 import { EventAttendancePanel } from "../components/analytics/EventAttendancePanel";
+import { OrderItemsList } from "../components/orders/OrderItemsList";
 import { Button, buttonClass } from "../components/ui/Button";
 import { formatLongDate, formatPrice, formatShortDate, formatDateTime } from "../lib/format";
 import type { EventSales, EventStaff } from "../api/types";
@@ -149,9 +150,8 @@ export function OrganizerSalesPage() {
                           {order.ticketCount} {tx(" бил. · Создан ")}{formatDateTime(order.createdAt, locale)}
                           {order.paidAt ? tx(" · Оплачен {0}", [formatDateTime(order.paidAt, locale)]) : ""}
                         </p>
-                        <ul className="mt-2 text-xs">
-                          {order.items.map((item) => <li key={item.ticketTypeId}>{item.ticketTypeName} × {item.quantity}</li>)}
-                        </ul>
+                        {order.attendeeName && <p className="mt-1 text-xs">{tx("Посетитель: ")}{order.attendeeName}</p>}
+                        <OrderItemsList items={order.items} className="mt-2 text-xs" />
                           {order.status === "PAID" && <RefundOrderButton orderId={order.id} totalAmount={order.totalAmount} />}
                       </article>
                     ))}
@@ -295,7 +295,7 @@ export function AdminEventSalesPage() {
         </form>
         {orders.isLoading && <LoadingState />}{orders.error && <ErrorState error={orders.error} onRetry={() => void orders.refetch()} />}
         {orders.data?.content.length === 0 && <p className="text-sm">{tx("Заказов нет.")}</p>}
-        {orders.data?.content.map(order => <article key={order.id} className="rounded-lg bg-surface p-3 text-sm"><p className="font-semibold">№{order.id} · {order.buyerEmail}</p>{order.attendeeName && <p>{order.attendeeName}</p>}<p>{statusLabel(order.status)} · {formatPrice(order.totalAmount, locale)} {tx(" · Билетов: ")}{order.ticketCount}</p> {order.status === "PAID" && <RefundOrderButton orderId={order.id} totalAmount={order.totalAmount} />}</article>)}
+        {orders.data?.content.map(order => <article key={order.id} className="rounded-lg bg-surface p-3 text-sm"><p className="font-semibold">№{order.id} · {order.buyerEmail}</p>{order.attendeeName && <p>{tx("Посетитель: ")}{order.attendeeName}</p>}<p>{statusLabel(order.status)} · {formatPrice(order.totalAmount, locale)} {tx(" · Билетов: ")}{order.ticketCount}</p><OrderItemsList items={order.items} className="mt-1 text-xs" /> {order.status === "PAID" && <RefundOrderButton orderId={order.id} totalAmount={order.totalAmount} />}</article>)}
         <OrdersPagination page={orderPage} totalPages={orders.data?.totalPages ?? 0} onChange={setOrderPage} />
       </section>
     </>}
