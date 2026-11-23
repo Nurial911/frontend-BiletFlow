@@ -103,7 +103,9 @@ async function readErrorMessage(response: Response): Promise<string> {
     case 403: return "Нет доступа.";
     case 404: return "Не найдено.";
     case 413: return "Файл превышает допустимый размер 5 МБ.";
-    case 409: return "Такой пользователь уже существует.";
+    // 409 covers many conflicts (taken seat, used-up promo code, repeated report, existing account),
+    // so the fallback stays neutral; the backend's own message is shown whenever it sends one.
+    case 409: return "Не удалось выполнить действие: данные уже изменились или такая запись уже есть. Обновите страницу и попробуйте снова.";
     default: return "Ошибка сервера. Попробуйте позже.";
   }
 }

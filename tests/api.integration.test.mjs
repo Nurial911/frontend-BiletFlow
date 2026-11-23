@@ -75,6 +75,10 @@ test("event report submission preserves duplicate-report errors and review is se
   assert.equal((await platform.reportEvent(7, "FRAUD", "Evidence")).status, "OPEN");
   request("/api/events/7/reports", "POST", { reason: "OTHER" }, { message: "You already have an open report" }, 409);
   await assert.rejects(platform.reportEvent(7,"OTHER"), e => e.status === 409 && e.message.includes("already"));
+  request("/api/events/7/reports", "POST", { reason: "OTHER" }, undefined, 409);
+  await assert.rejects(platform.reportEvent(7,"OTHER"), e => e.status === 409 && !/пользователь/.test(e.message) && /Обновите страницу/.test(e.message)
+    && pageLanguage.translateText("en", e.message).startsWith("The action could not be completed")
+    && pageLanguage.translateText("kk", e.message).startsWith("Әрекет орындалмады"));
   request("/api/admin/event-reports?status=OPEN&page=0", "GET", undefined, { content: [] });
   await platform.getReports({ status: "OPEN", page: 0 });
   request("/api/admin/event-reports/4", "GET", undefined, { id: 4 });
