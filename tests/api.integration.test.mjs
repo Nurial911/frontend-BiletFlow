@@ -168,6 +168,25 @@ test("comma-separated backend errors are never rewritten as Russian date templat
   }
 });
 
+test("English backend error messages are shown in Russian and Kazakh, keeping their details", () => {
+  const cases = [
+    ["Event not found with id: 7", "Событие №7 не найдено.", "№7 іс-шара табылмады."],
+    ["Sales of 'VIP' have ended", "Продажи билетов «VIP» завершены.", "«VIP» билеттерін сату аяқталды."],
+    ["This promo code has expired", "Срок действия промокода истёк.", "Промокодтың мерзімі өтті."],
+    ["This seat is no longer available: North stand, row 3, seat 7. Please pick other seats.", "Это место больше недоступно: North stand, row 3, seat 7. Выберите другие места.", "Бұл орын енді қолжетімсіз: North stand, row 3, seat 7. Басқа орындарды таңдаңыз."],
+    ["This account has been suspended: Fraud", "Этот аккаунт приостановлен. Причина: Fraud", "Бұл аккаунт уақытша тоқтатылған. Себебі: Fraud"],
+  ];
+  for (const [english, russian, kazakh] of cases) {
+    assert.equal(pageLanguage.translateText("en", english), english);
+    assert.equal(pageLanguage.translateText("ru", english), russian);
+    assert.equal(pageLanguage.translateText("kk", english), kazakh);
+  }
+});
+test("a short template such as '{0} at {1}' never takes over a longer message containing 'at'", () => {
+  assert.equal(pageLanguage.translateText("ru", "A report can cover at most 31 days"), "Отчёт может охватывать не более 31 дней.");
+  assert.equal(pageLanguage.translateText("ru", "You can choose at most 7 seats in one order."), "В одном заказе можно выбрать не больше 7 мест.");
+  assert.equal(pageLanguage.translateText("kk", "10 December at 18:00"), "10 December күні 18:00");
+});
 test("checkout sends attendee name and the server promo code; quote never creates an order", async () => {
   const items = [{ ticketTypeId: 3, quantity: 2 }];
   request("/api/orders/quote", "POST", { eventId: 7, items, promoCode: "JAZZ2026" }, { subtotalAmount: 10000, discountAmount: 2000, totalAmount: 8000, promoCode: "JAZZ2026" });
