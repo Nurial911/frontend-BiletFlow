@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePublicEvents } from "../hooks/useEvents";
 import { EventCard, EventCardSkeleton } from "../components/events/EventCard";
 import { HeroBanner } from "../components/events/HeroBanner";
@@ -12,6 +12,10 @@ import { cities, venueCity } from "../lib/cities";
 // Home page = the "event search" wireframe.
 // Filters live in the URL (?q=…&category=…&date=…) so links can be shared
 // and the browser's back button works.
+// Cards shown at first and added by "Show more". Cards that are not shown
+// do not load their prices.
+const CARDS_PER_STEP = 24;
+
 export default function HomePage() {
   const { data: events, isLoading, error, refetch } = usePublicEvents();
   const [params, setParams] = useSearchParams();
@@ -25,6 +29,10 @@ export default function HomePage() {
   const cityParam = params.get("city");
   const city = cityParam === "unknown" || cities.some(item => item.id === cityParam) ? cityParam : null;
   const hasFilters = !!(q || category || date || city);
+  // Start again from the first cards whenever the filters change.
+  const filterKey = [q, category, date, city].join("|");
+  const [shownCount, setShownCount] = useState({ key: filterKey, count: CARDS_PER_STEP });
+  const visibleCount = shownCount.key === filterKey ? shownCount.count : CARDS_PER_STEP;
 
   const setDate = (day: string | null) => {
     const next = new URLSearchParams(params);
@@ -78,9 +86,20 @@ export default function HomePage() {
 
       {shown.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {shown.map((e) => (
+          {shown.slice(0, visibleCount).map((e) => (
             <EventCard key={e.id} event={e} />
           ))}
+        </div>
+      )}
+      {shown.length > visibleCount && (
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => setShownCount({ key: filterKey, count: visibleCount + CARDS_PER_STEP })}
+            className="rounded-lg border px-5 py-2 text-sm font-semibold hover:bg-surface"
+          >
+            {t("showMore")}
+          </button>
         </div>
       )}
     </>

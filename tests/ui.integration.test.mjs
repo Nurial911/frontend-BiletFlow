@@ -192,6 +192,22 @@ test("English and Kazakh home routes translate navigation, dates, categories and
   assert.match(kk, /Билет сатып алу/);
   assert.match(kk, /желтоқсан/);
 });
+test("the catalog shows 24 cards first and a show-more button, so hidden cards load no prices yet", async () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({ ...event, id: 100 + i, title: `Concert ${i + 1}` }));
+  const html = await renderRoute("/?lang=en", null, [[["events"], page(many)]]);
+  assert.equal((html.match(/<h3[^>]*>Concert \d+</g) ?? []).length, 24);
+  assert.match(html, /Concert 24</);
+  assert.doesNotMatch(html, /Concert 25</);
+  assert.match(html, />Show more</);
+  const few = await renderRoute("/?lang=en", null, catalogSeeds);
+  assert.doesNotMatch(few, /Show more/);
+});
+test("an event card uses the event's minPrice when the backend sends it", async () => {
+  const priced = [{ ...event, id: 7, title: "Free jazz", minPrice: 0 }, { ...event, id: 8, title: "Paid jazz", minPrice: 2500 }];
+  const html = await renderRoute("/?lang=kk", null, [[["events"], page(priced)]]);
+  assert.match(html, /Тегін/);
+  assert.match(html, /2[\s\u00a0]500 ₸ бастап/);
+});
 test("city, search, category and date filters combine and category links retain the city", async () => {
   const html = await renderRoute("/?city=astana&lang=en&q=astana&category=MUSIC&date=2027-12-10", null, catalogSeeds);
   assert.match(html, /Astana jazz/);

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getEvent, getEvents, getTicketTypes } from "../api/events";
+import { getAllEvents, getEvent, getTicketTypes } from "../api/events";
 import { parseDate } from "../lib/format";
 import type { Event, TicketType } from "../api/types";
 
@@ -18,7 +18,7 @@ const byStartTime = (a: Event, b: Event) =>
 export function usePublicEvents() {
   return useQuery({
     queryKey: ["events"],
-    queryFn: () => getEvents(),
+    queryFn: () => getAllEvents(),
     select: (page) => page.content.filter(isVisible).sort(byStartTime),
   });
 }
@@ -31,11 +31,11 @@ export function useEvent(id: number) {
   });
 }
 
-export function useTicketTypes(eventId: number) {
+export function useTicketTypes(eventId: number, enabled = true) {
   return useQuery({
     queryKey: ["ticket-types", eventId],
     queryFn: () => getTicketTypes(eventId),
-    enabled: Number.isFinite(eventId),
+    enabled: enabled && Number.isFinite(eventId),
   });
 }
 
