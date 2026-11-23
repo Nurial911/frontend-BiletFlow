@@ -8,10 +8,12 @@ import {
   getEventStaff,
   removeEventStaff,
 } from "../api/checkIn";
-import { getEventOrders, getEventSales, getOrganizerSales } from "../api/sales";
+import { getEventOrders, getOrganizerSales } from "../api/sales";
 import { RefundOrderButton } from "../components/orders/RefundOrderButton";
 import { EventAttendancePanel } from "../components/analytics/EventAttendancePanel";
 import { OrderItemsList } from "../components/orders/OrderItemsList";
+import { EventSalesAnalytics, InventoryMetrics } from "../components/analytics/SalesInsights";
+import { summarizeInventory } from "../lib/salesInventory";
 import { Button, buttonClass } from "../components/ui/Button";
 import { formatLongDate, formatPrice, formatShortDate, formatDateTime } from "../lib/format";
 import type { EventSales, EventStaff } from "../api/types";
@@ -34,11 +36,6 @@ export function OrganizerSalesPage() {
     queryKey: ["organizer-sales-summary"],
     queryFn: () => getOrganizerSales(),
   });
-  const eventSales = useQuery({
-    queryKey: ["organizer-sales-detail", selectedEventId],
-    queryFn: () => getEventSales(selectedEventId!),
-    enabled: selectedEventId !== null,
-  });
   const eventOrders = useQuery({
     queryKey: ["organizer-event-orders", selectedEventId, orderPage, orderStatus, orderQuery],
     queryFn: () => getEventOrders(selectedEventId!, {
@@ -52,7 +49,6 @@ export function OrganizerSalesPage() {
   const retry = () => {
     void sales.refetch();
     if (selectedEventId !== null) {
-      void eventSales.refetch();
       void eventOrders.refetch();
     }
   };
@@ -88,6 +84,7 @@ export function OrganizerSalesPage() {
             <Metric label={tx("Ожидают оплаты")} value={summary.totals.pendingOrders.toLocaleString(locale)} />
             <Metric label={tx("Зарезервировано билетов")} value={summary.totals.ticketsReserved.toLocaleString(locale)} />
           </div>
+          <InventoryMetrics {...summarizeInventory(rows)} />
           <div className="grid gap-2 sm:grid-cols-4">
             <Metric label={tx("Скидки")} value={formatPrice(summary.totals.discounts, locale)} />
             <Metric label={tx("Возвраты")} value={formatPrice(summary.totals.refunds ?? 0, locale)} />
@@ -114,11 +111,7 @@ export function OrganizerSalesPage() {
           {selectedEventId !== null && (
             <section className="rounded-xl border p-4">
               <h3 className="text-lg font-semibold">{tx("Динамика и заказы")}</h3>
-              {eventSales.isLoading ? <LoadingState /> : eventSales.error ? (
-                <ErrorState error={eventSales.error} onRetry={() => { void eventSales.refetch(); }} />
-              ) : eventSales.data ? (
-                <EventSalesDetail sales={eventSales.data} />
-              ) : null}
+              <EventSalesAnalytics key={selectedEventId} eventId={selectedEventId}>{data => <EventSalesDetail sales={data} />}</EventSalesAnalytics>
               <EventAttendancePanel key={selectedEventId} eventId={selectedEventId} />
               <div className="mt-6 border-t pt-4">
                 <h4 className="font-semibold">{tx("Заказы мероприятия")}</h4>
@@ -194,6 +187,7 @@ function EventSalesCard({ row, expanded, onToggle, toggleLabel }: { row: EventSa
         <p>{tx("Зарезервировано: ")}<strong>{row.ticketsReserved}</strong></p>
         <p>{tx("Выручка: ")}<strong>{formatPrice(row.revenue, locale)}</strong></p>
       </div>
+      <InventoryMetrics capacity={row.capacity} ticketsRemaining={row.ticketsRemaining} percentSold={row.percentSold} />
       {row.ticketTypes.length === 0 ? <p className="mt-3 text-sm text-muted">{tx("Типы билетов не добавлены.")}</p> : (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
@@ -224,6 +218,7 @@ export function EventSalesDetail({ sales }: { sales: EventSales }) {
   const maxDailyRevenue = Math.max(0, ...sales.salesByDay.map((day) => day.revenue));
   return (
     <div className="mt-4">
+      <InventoryMetrics capacity={sales.capacity} ticketsRemaining={sales.ticketsRemaining} percentSold={sales.percentSold} />
       <div className="grid gap-2 sm:grid-cols-4">
         <Metric label={tx("Выручка")} value={formatPrice(sales.revenue, locale)} />
         <Metric label={tx("Оплачено заказов")} value={String(sales.paidOrders)} />
@@ -275,7 +270,6 @@ export function AdminEventSalesPage() {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const events = useQuery({ queryKey: ["admin-sales-events", page], queryFn: () => getAdminEvents({ page, size: 20 }) });
-  const sales = useQuery({ queryKey: ["organizer-sales-detail", selected], queryFn: () => getEventSales(selected!), enabled: selected !== null });
   const orders = useQuery({ queryKey: ["organizer-event-orders", selected, orderPage, status, search], queryFn: () => getEventOrders(selected!, { page: orderPage, status: status || undefined, query: search }), enabled: selected !== null });
   return <section className="space-y-5">
     <h2 className="text-xl font-bold">{tx("Продажи и заказы по событию")}</h2>
@@ -285,8 +279,7 @@ export function AdminEventSalesPage() {
     {events.data?.content.length === 0 && <p className="text-sm">{tx("Мероприятий нет.")}</p>}
     <OrdersPagination page={page} totalPages={events.data?.totalPages ?? 0} onChange={setPage} />
     {selected !== null && <>
-      {sales.isLoading && <LoadingState />}{sales.error && <ErrorState error={sales.error} onRetry={() => void sales.refetch()} />}
-      {sales.data && <><EventSalesCard row={sales.data} expanded={false} toggleLabel={tx("Обновить статистику")} onToggle={() => void sales.refetch()} /><EventSalesDetail sales={sales.data} /></>}
+      <EventSalesAnalytics key={selected} eventId={selected}>{data => <EventSalesDetail sales={data} />}</EventSalesAnalytics>
       <EventAttendancePanel key={selected} eventId={selected} />
       <section className="space-y-3 rounded-xl border p-4"><h3 className="font-semibold">{tx("Заказы события")}</h3>
         <form onSubmit={e => { e.preventDefault(); setSearch(query.trim()); setOrderPage(0); }} className="flex flex-wrap gap-2">

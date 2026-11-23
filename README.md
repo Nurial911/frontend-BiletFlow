@@ -140,8 +140,8 @@ up to two fractional digits, including server-calculated promo discounts.
   admin staff management is allowed; event/ticket editing remains owner-only.
 
 All authorization must still be enforced by the backend. Signing out clears
-private query caches before another account is used. An authenticated 401/403 clears
-the session and displays the server reason. Refunds, event history, account suspension,
+private query caches before another account is used. A 401, or a 403 carrying the explicit code ACCOUNT_SUSPENDED, clears
+the session and displays the server reason. Ordinary 403 responses preserve the session. Refunds, event history, account suspension,
 assigned seat selection and calendar export are integrated. Payouts remain simulated;
 the payout screens explicitly indicate that no money moves.
 
@@ -275,3 +275,26 @@ src/
 | `npm run dev` | run the app for development |
 | `npm run build` | check types and build the final version into `dist/` |
 | `npm run preview` | open the built version |
+
+## Registration, calendar and sales contracts
+
+- Event ownership is checked against the signed-in user ID, not the organizer profile ID.
+  Owner/admin access to drafts is enforced by the backend; preview links never grant access.
+- Registration boundaries and event start are interpreted in Asia/Almaty. The event page
+  updates the registration state while open and checks it again before submitting an order.
+- Cancelled-event ICS downloads use the authenticated calendar endpoint unchanged. The backend
+  preserves the UID and increments SEQUENCE with STATUS:CANCELLED. A cancelled/refunded ticket
+  alone does not imply that its event was cancelled; ticket calendars consult event metadata.
+- The live sales API supports from/to (inclusive dates) and ticketTypeId. In the current backend
+  implementation these affect salesByDay only. Financial totals, inventory and campaigns remain
+  all-time, explicitly labelled in the UI.
+- Inventory uses the backend ticketsRemaining and percentSold fields. Remaining capacity is
+  capacity minus sold and reserved tickets; section restrictions may further limit sales.
+  Aggregate percentages use total sold divided by total known capacity, not an average of percentages.
+  Missing capacities or remaining counts are displayed as unknown instead of invented zeros.
+- Suspension integration: the current backend ErrorResponse does not expose a machine code.
+  It must add code: ACCOUNT_SUSPENDED to suspension-related 403 responses for automatic logout.
+  The frontend supports top-level code or error.code and does not infer suspension from prose.
+- Halyk accepts only the exact test and production payment-api.js URLs from the official
+  payment-page documentation: https://epayment.kz/ru/docs/platezhnaya-stranica .
+  Other hosts, paths, ports, credentials, query strings and fragments are rejected.

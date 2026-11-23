@@ -1,16 +1,17 @@
 import { CalendarMenu, ReportEventForm } from "../components/events/EventExtras";
 import { useLanguage } from "../i18n/LanguageContext";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getOrganizerProfile } from "../api/events";
+import { getCalendar } from "../api/platform";
 import { ApiError } from "../api/client";
 import { createOrder, type CheckoutDetails, type OrderItemInput } from "../api/orders";
 import { useAuth } from "../auth/AuthContext";
 import { minPrice, useEvent, useTicketTypes } from "../hooks/useEvents";
 import { Button } from "../components/ui/Button";
 import { ErrorMessage } from "../components/ui/ErrorMessage";
-import { categoryLabel, formatLongDate, formatPrice, formatTime } from "../lib/format";
+import { categoryLabel, formatDateTime, formatLongDate, formatPrice, formatTime } from "../lib/format";
+import { registrationState } from "../lib/registration";
 import { TicketSelector } from "../components/events/TicketSelector";
 import { EventPoster } from "../components/events/EventPoster";
 
@@ -26,7 +27,13 @@ export default function EventPage() {
   const { data: types, isLoading: typesLoading } = useTicketTypes(id);
   const { user, isLoggedIn, openLogin } = useAuth();
   const queryClient = useQueryClient();
-  const ownProfile = useQuery({ queryKey: ["organizer-profile"], queryFn: getOrganizerProfile, enabled: user?.role.replace(/^ROLE_/, "") === "ORGANIZER" });
+  // Cancelled events disappear from public event details, but ticket holders retain calendar access.
+  const cancelledCalendar = useQuery({ queryKey: ["calendar", id], queryFn: () => getCalendar(id), enabled: isLoggedIn && error instanceof ApiError && error.status === 404, retry: false });
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const orderMutation = useMutation({
     mutationFn: ({ items, details }: { items: OrderItemInput[]; details: CheckoutDetails }) => createOrder(id, items, details),
     onSuccess: (order) => navigate(`/orders/${order.id}`),
@@ -40,6 +47,7 @@ export default function EventPage() {
   if (isLoading) return <EventPageSkeleton />;
 
   if (error instanceof ApiError && error.status === 404) {
+    if (cancelledCalendar.data?.cancelled) return <section className="py-8"><h1 className="text-xl font-bold">{tx("Событие отменено")}</h1><CalendarMenu eventId={id} cancelled /><Link to="/account" className="underline">{tx("Мои билеты")}</Link></section>;
     return (
       <div className="py-16 text-center">
         <h1 className="text-xl font-bold">{tx("Событие не найдено")}</h1>
@@ -55,18 +63,24 @@ export default function EventPage() {
   const posterNeedsAuth = event.status !== "PUBLISHED" || event.visibilityStatus === "PRIVATE";
   const price = minPrice(types);
   const soldOut = visibleTypes.length > 0 && visibleTypes.every((t) => t.available <= 0);
+  const registration = registrationState(event, now);
+  const registrationMessage = registration === "not-open" ? tx("Регистрация ещё не открыта") : registration === "closed" ? tx("Регистрация закрыта") : registration === "started" ? tx("Событие уже началось") : "";
+  const preview = event.status === "DRAFT";
 
   const onChooseTickets = () => {
+    if (registrationState(event) !== "open") { setNow(Date.now()); return; }
     if (!isLoggedIn) return openLogin();
     document.getElementById("tickets")?.scrollIntoView({ behavior: "smooth" });
   };
   const onContinue = (items: OrderItemInput[], details: CheckoutDetails) => {
+    if (registrationState(event) !== "open") { setNow(Date.now()); return; }
     if (!isLoggedIn) return openLogin();
     orderMutation.mutate({ items, details });
   };
 
   return (
     <article>
+      {preview && <p role="status" className="mb-4 rounded-xl bg-amber-50 p-4 font-semibold text-amber-900">{tx("Черновик — не опубликован. Событие не видно посетителям.")}</p>}
       <nav aria-label={tx("Навигация")} className="text-xs text-muted">
         <Link to="/" className="hover:underline">{tx("Главная")}</Link>
         {" / "}
@@ -90,6 +104,12 @@ export default function EventPage() {
           <p className="mt-2 text-sm">
             {formatLongDate(event.startTime, locale)}, {formatTime(event.startTime)}
           </p>
+          {event.endTime && <p className="mt-2 text-sm">{tx("Окончание: {0}", [formatDateTime(event.endTime, locale)])}</p>}
+          {(event.registrationOpeningTime || event.registrationClosingTime) && <div className="mt-3 space-y-1 text-sm">
+            {event.registrationOpeningTime && <p>{tx("Открытие регистрации: {0}", [formatDateTime(event.registrationOpeningTime, locale)])}</p>}
+            {event.registrationClosingTime && <p>{tx("Закрытие регистрации: {0}", [formatDateTime(event.registrationClosingTime, locale)])}</p>}
+          </div>}
+          {registrationMessage && <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{registrationMessage}</p>}
           {event.venue && (
             <p className="mt-1 text-sm text-muted">
               {event.venue.name}
@@ -119,7 +139,7 @@ export default function EventPage() {
                 </p>
               </div>
               {!ticketsNotRequired && (
-                <Button onClick={onChooseTickets} disabled={price === null || soldOut}>
+                <Button onClick={onChooseTickets} disabled={price === null || soldOut || registration !== "open" || preview}>
                   {soldOut ? tx("Билеты закончились") : tx("Выбрать билеты")}
                 </Button>
               )}
@@ -155,11 +175,11 @@ export default function EventPage() {
               {orderMutation.error instanceof Error ? tx(orderMutation.error.message) : tx("Не удалось создать заказ.")}
             </p>
           )}
-          <TicketSelector key={`${id}:${initialPromo}`} eventId={id} types={visibleTypes} initialPromo={initialPromo} paidSalesActive={event.paidSalesActive} seatingMode={event.seatingMode} blocked={event.suspended || event.status === "CANCELLED" || event.status === "DRAFT"} onContinue={onContinue} busy={orderMutation.isPending} />
+          <TicketSelector key={`${id}:${initialPromo}`} eventId={id} types={visibleTypes} initialPromo={initialPromo} paidSalesActive={event.paidSalesActive} seatingMode={event.seatingMode} blocked={event.suspended || event.status === "CANCELLED" || preview || registration !== "open"} onContinue={onContinue} busy={orderMutation.isPending} />
         </section>
       )}
-      <CalendarMenu eventId={id} cancelled={event.status === "CANCELLED"} />
-      {isLoggedIn && (user?.role.replace(/^ROLE_/, "") !== "ORGANIZER" || (ownProfile.data && ownProfile.data.id !== event.organizerId)) && <ReportEventForm eventId={id} />}
+      {!preview && <CalendarMenu eventId={id} cancelled={event.status === "CANCELLED"} />}
+      {isLoggedIn && user?.id !== event.organizerId && <ReportEventForm eventId={id} />}
       <Link to={`/support/new?eventId=${id}`} className="mt-6 inline-block text-sm underline">{tx("Задать вопрос о событии")}</Link>
     </article>
   );

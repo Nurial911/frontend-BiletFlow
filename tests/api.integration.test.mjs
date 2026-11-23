@@ -5,6 +5,9 @@ import { build } from "esbuild";
 // Bundle the actual TypeScript modules; tests need no browser or live backend.
 const bundle = await build({ stdin: { contents: `
   export * as orders from './src/api/orders';
+  export * as sales from './src/api/sales';
+  export { registrationState } from './src/lib/registration';
+  export { summarizeInventory } from './src/lib/salesInventory';
   export * as seating from './src/api/seating';
   export * as platform from './src/api/platform';
   export * as users from './src/api/users';
@@ -22,7 +25,7 @@ const bundle = await build({ stdin: { contents: `
   export { startOrderPayment } from './src/lib/checkout';
   export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } from './src/lib/format';
 `, resolveDir: process.cwd() }, bundle: true, platform: "node", format: "esm", write: false });
-const { checkIn, orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { checkIn, orders, sales, registrationState, summarizeInventory, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 let expected;
 let requests;
@@ -64,6 +67,67 @@ test("the catalog loads every page of events instead of stopping at the first 10
   request("/api/events?page=0&size=100", "GET", undefined, { content: [{ id: 1 }], totalPages: 1, number: 0, last: true });
   assert.equal((await events.getAllEvents()).content.length, 1);
 });
+test("ordinary authenticated 403 preserves the token, including suspension words without a machine code", async () => {
+  const messages = [];
+  const unsubscribe = client.onAuthFailure(message => messages.push(message));
+  try {
+    request("/api/events/7", "GET", undefined, { message: "Нет доступа" }, 403);
+    await assert.rejects(events.getEvent(7), e => e.status === 403);
+    request("/api/events/7/calendar.ics", "GET", undefined, { message: "Account suspended" }, 403);
+    await assert.rejects(platform.downloadCalendar(7), e => e.status === 403);
+    assert.equal(client.getToken(), "test-token");
+    assert.deepEqual(messages, []);
+    request("/api/events/7", "GET", undefined, { message: "Token expired" }, 401);
+    await assert.rejects(events.getEvent(7), e => e.status === 401);
+    assert.equal(client.getToken(), null);
+    assert.deepEqual(messages, ["Token expired"]);
+  } finally { unsubscribe(); }
+});
+
+test("an old unauthorized response cannot clear a newly adopted token", async () => {
+  const originalFetch = globalThis.fetch;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  globalThis.fetch = async (...args) => { const response = await originalFetch(...args); await gate; return response; };
+  request("/api/events/7", "GET", undefined, { message: "Expired" }, 401);
+  const pending = events.getEvent(7);
+  client.saveToken("new-token");
+  release();
+  await assert.rejects(pending, e => e.status === 401);
+  assert.equal(client.getToken(), "new-token");
+});
+
+test("checkout rejects arbitrary scripts, lookalike Halyk hosts, nonstandard ports and URL suffixes", async () => {
+  for (const scriptUrl of ["https://evil.example/payform/payment-api.js", "https://epay.homebank.kz.evil.example/payform/payment-api.js", "https://epay.homebank.kz@evil.example/payform/payment-api.js", "https://epay.homebank.kz:444/payform/payment-api.js", "https://epay.homebank.kz/payform/payment-api.js?override=1", "https://epay.homebank.kz/another.js", "http://epay.homebank.kz/payform/payment-api.js"]) {
+    request("/api/orders/42/payment-session", "POST", undefined, { provider: "HALYK", scriptUrl, payment: {} });
+    await assert.rejects(startOrderPayment(order, () => {}), /не разрешён/);
+  }
+  assert.equal(scripts.length,0);
+  assert.equal(bankPayments.length,0);
+});
+
+test("registration boundaries use Kazakhstan time regardless of browser timezone", () => {
+  const event = { startTime: "2027-01-01T18:00:00", registrationOpeningTime: "2027-01-01T10:00:00", registrationClosingTime: "2027-01-01T17:00:00" };
+  assert.equal(registrationState(event, Date.parse("2027-01-01T04:59:59Z")), "not-open");
+  assert.equal(registrationState(event, Date.parse("2027-01-01T05:00:00Z")), "open");
+  assert.equal(registrationState(event, Date.parse("2027-01-01T12:00:01Z")), "closed");
+  assert.equal(registrationState(event, Date.parse("2027-01-01T13:00:00Z")), "started");
+  assert.equal(registrationState({ startTime: event.startTime }, Date.parse("2027-01-01T11:00:00Z")), "open");
+});
+
+test("inventory totals use server remaining counts and a capacity-weighted percentage; unknown is not zero", () => {
+  assert.deepEqual(summarizeInventory([{ capacity:100,ticketsSold:50,ticketsRemaining:12 },{ capacity:300,ticketsSold:30,ticketsRemaining:100 }]), { capacity:400,ticketsRemaining:112,percentSold:20 });
+  assert.deepEqual(summarizeInventory([{ capacity:null,ticketsSold:50,ticketsRemaining:null }]), { capacity:null,ticketsRemaining:null,percentSold:null });
+  assert.equal(summarizeInventory([{ capacity:0,ticketsSold:0,ticketsRemaining:0 }]).percentSold,null);
+});
+
+test("sales filters use the supported date and ticket-type parameters while default requests stay unchanged", async () => {
+  request("/api/organizer/events/7/sales?from=2026-11-01&to=2026-11-23&ticketTypeId=4", "GET", undefined, { salesByDay: [], ticketsRemaining:12,percentSold:50 });
+  assert.equal((await sales.getEventSales(7,{ from:"2026-11-01",to:"2026-11-23",ticketTypeId:4 })).ticketsRemaining,12);
+  request("/api/organizer/events/7/sales", "GET", undefined, { salesByDay: [] });
+  await sales.getEventSales(7);
+});
+
 test("calendar links and calendar downloads use authenticated API requests", async () => {
   request("/api/events/7/calendar", "GET", undefined, { cancelled: false, googleCalendarUrl: "https://calendar.google.com/calendar/render" });
   assert.equal((await platform.getCalendar(7)).cancelled, false);
@@ -145,16 +209,16 @@ test("user search and suspension keep backend field names", async () => {
   request("/api/users/3/unsuspend", "POST", undefined, {});
   await users.setUserSuspended(3,false);
 });
-test("authenticated 403 signs out globally and preserves the suspension reason, including blob calls", async () => {
+test("explicit account suspension signs out and preserves its reason for JSON and blob calls", async () => {
   const messages = [];
   const unsubscribe = client.onAuthFailure(message => messages.push(message));
   try {
-    request("/api/events/7", "GET", undefined, { message: "Account suspended: review" }, 403);
+    request("/api/events/7", "GET", undefined, { code: "ACCOUNT_SUSPENDED", message: "Account suspended: review" }, 403);
     await assert.rejects(events.getEvent(7), e => e.status === 403);
     assert.equal(client.getToken(), null);
     assert.deepEqual(messages, ["Account suspended: review"]);
     client.saveToken("test-token");
-    request("/api/events/7/calendar.ics", "GET", undefined, { message: "Account suspended" }, 403);
+    request("/api/events/7/calendar.ics", "GET", undefined, { error: { code: "ACCOUNT_SUSPENDED", message: "Account suspended" } }, 403);
     await assert.rejects(platform.downloadCalendar(7));
     assert.equal(client.getToken(), null);
     assert.equal(messages.length, 2);
@@ -211,7 +275,7 @@ test("daily sales dates and event timestamps both use Kazakhstan time", () => {
 });
 
 test("Halyk checkout launches the bank script without calling /pay", async () => {
-  const session = { provider: "HALYK", simulated: true, scriptUrl: "https://bank.example/payment-test.js", payment: { invoiceId: "invoice-42" } };
+  const session = { provider: "HALYK", simulated: true, scriptUrl: "https://test-epay.epayment.kz/payform/payment-api.js", payment: { invoiceId: "invoice-42" } };
   request("/api/orders/42/payment-session", "POST", undefined, session);
   let received;
   assert.equal(await startOrderPayment(order, value => { received = value; }), undefined);
@@ -259,7 +323,7 @@ test("unknown providers and malformed bank sessions never fall back to simulated
 
 test("bank script loading failure is recoverable", async () => {
   document.head.append = script => queueMicrotask(() => script.onerror());
-  const session = { provider: "HALYK", scriptUrl: "https://bank.example/retry.js", payment: {} };
+  const session = { provider: "HALYK", scriptUrl: "https://epay.homebank.kz/payform/payment-api.js", payment: {} };
   request("/api/orders/42/payment-session", "POST", undefined, session);
   await assert.rejects(startOrderPayment(order, () => {}), /Не удалось загрузить/);
   document.head.append = script => queueMicrotask(() => script.onload());
@@ -342,9 +406,7 @@ test("payout and verification requests match organizer/admin contracts", async (
 test("event moderation sends the reason and preserves errors for a retry", async () => {
   request("/api/events/1/suspend", "POST", { reason: "Проверка мероприятия" }, { message: "Нет доступа" }, 403);
   await assert.rejects(events.setEventSuspended(1, true, "Проверка мероприятия"), error => error instanceof client.ApiError && error.status === 403 && error.message === "Нет доступа");
-  assert.equal(client.getToken(), null);
-  // Retry only after signing in again: authenticated 403 now invalidates the session.
-  client.saveToken("test-token");
+  assert.equal(client.getToken(), "test-token");
   request("/api/events/1/suspend", "POST", { reason: "Проверка мероприятия" }, { id: 1, suspended: true, suspensionReason: "Проверка мероприятия" });
   assert.equal((await events.setEventSuspended(1, true, "Проверка мероприятия")).suspended, true);
   request("/api/events/1/unsuspend", "POST", undefined, { id: 1, suspended: false });

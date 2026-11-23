@@ -97,6 +97,7 @@ function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyM
           <div className="flex flex-wrap items-center gap-3">
             <StatusBadge status={event.status} />
             {base === "/organizer" && <>
+            {event.status === "DRAFT" && <Link to={`/events/${event.id}?preview=1`} className="text-sm font-semibold underline">{tx("Предпросмотр")}</Link>}
             <Link to={`${base}/events/${event.id}/tickets`} className="text-sm font-semibold underline">
               {tx("Билеты")}</Link>
             <Link to={`${base}/events/${event.id}/staff`} className="text-sm font-semibold underline">
@@ -1502,6 +1503,7 @@ export function ManageOrganizerEventsPage() {
                   >
                     {tx("Приостановить")}</Button>
                 ))}
+                {!platformAdmin && event.status === "DRAFT" && <Link to={`/events/${event.id}?preview=1`} className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold hover:bg-gray-200">{tx("Предпросмотр")}</Link>}
                 {!platformAdmin && event.status === "DRAFT" && (
                   <Button
                     disabled={mutation.isPending || checkingTicketsForEvent !== null}

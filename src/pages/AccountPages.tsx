@@ -467,7 +467,7 @@ function MyTicketCard({ ticket }: { ticket: Ticket }) {
   return (
     <article className="rounded-xl border p-4">
       <p className="text-xs text-muted">{ticket.eventTitle}</p>
-      <CalendarMenu eventId={ticket.eventId} cancelled={ticket.status === "CANCELLED" || ticket.status === "REFUNDED"} />
+      <CalendarMenu eventId={ticket.eventId} resolveStatus />
       <h3 className="mt-1 font-semibold">{ticket.ticketTypeName}</h3>
       {ticket.seatLabel && <p className="mt-1 text-sm font-medium">{ticket.seatLabel}</p>}
       <p className="mt-2 text-sm">{tx("Статус: ")}{statusLabel(ticket.status)}</p>

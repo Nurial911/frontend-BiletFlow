@@ -9,6 +9,7 @@ import type { OrderStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Button, buttonClass } from "../components/ui/Button";
 import { ErrorMessage } from "../components/ui/ErrorMessage";
+import { CalendarMenu } from "../components/events/EventExtras";
 import { formatPrice, formatDateTime } from "../lib/format";
 
 const statusLabels: Record<OrderStatus, string> = {
@@ -111,6 +112,9 @@ export default function OrderConfirmationPage({ paymentResult = false }: { payme
         <p className="mt-3 text-sm text-muted">{tx("Статус: ")}{tx(statusLabels[currentOrder.status])}</p>
       </section>
 
+      {currentOrder.status === "PAID" && (
+        <CalendarMenu eventId={currentOrder.eventId} resolveStatus />
+      )}
       {currentOrder.status === "PAID" && (
         <p className="mt-4 rounded-xl bg-green-50 p-4 text-sm text-green-800">
           {isFree ? tx("Бесплатные билеты подтверждены.") : tx("Оплата подтверждена.")} {tx(" Билеты доступны в личном кабинете.")}</p>

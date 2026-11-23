@@ -9,12 +9,12 @@ export function RequestError({ error }: { error: unknown }) {
   const { tx } = useLanguage();
   return error ? <p role="alert" className="my-2 text-sm text-red-700">{typeof error === "string" ? tx(error) : error instanceof Error ? tx(error.message) : tx("Ошибка сервера. Попробуйте позже.")}</p> : null;
 }
-export function CalendarMenu({ eventId, cancelled = false }: { eventId: number; cancelled?: boolean }) {
+export function CalendarMenu({ eventId, cancelled = false, resolveStatus = false }: { eventId: number; cancelled?: boolean; resolveStatus?: boolean }) {
   const { tx } = useLanguage();
   const [open, setOpen] = useState(false);
-  const links = useQuery({ queryKey: ["calendar", eventId], queryFn: () => getCalendar(eventId), enabled: open });
+  const links = useQuery({ queryKey: ["calendar", eventId], queryFn: () => getCalendar(eventId), enabled: !cancelled && (open || resolveStatus), retry: false });
   const download = useMutation({ mutationFn: async () => downloadBlob(await downloadCalendar(eventId), `event-${eventId}.ics`) });
-  if (cancelled) return null;
+  if (cancelled || links.data?.cancelled) return <div className="my-3"><Button variant="secondary" disabled={download.isPending} onClick={() => download.mutate()}>{tx("Скачать отмену события (.ics)")}</Button><RequestError error={download.error} /></div>;
   return <div className="my-3"><Button variant="secondary" onClick={() => setOpen(!open)} aria-expanded={open}>{tx("Добавить в календарь")}</Button>{open && <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
     {links.isLoading && <p>{tx("Загрузка…")}</p>}
     <RequestError error={links.error || download.error} />

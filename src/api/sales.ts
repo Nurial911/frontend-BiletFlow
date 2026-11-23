@@ -8,8 +8,15 @@ export const getOrganizerSales = (eventIds?: number[]) => {
   return api<SalesSummary>(`/api/organizer/sales/events${query}`);
 };
 
-export const getEventSales = (eventId: number) =>
-  api<EventSales>(`/api/organizer/events/${eventId}/sales`);
+export interface SalesFilter { from?: string; to?: string; ticketTypeId?: number }
+// The backend applies these filters to salesByDay; headline totals and inventory stay all-time.
+export const getEventSales = (eventId: number, filter: SalesFilter = {}) => {
+  const params = new URLSearchParams();
+  if (filter.from) params.set("from", filter.from);
+  if (filter.to) params.set("to", filter.to);
+  if (filter.ticketTypeId !== undefined) params.set("ticketTypeId", String(filter.ticketTypeId));
+  return api<EventSales>(`/api/organizer/events/${eventId}/sales${params.size ? `?${params}` : ""}`);
+};
 
 export interface EventOrdersFilter {
   page?: number;

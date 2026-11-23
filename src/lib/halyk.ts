@@ -4,10 +4,15 @@ declare global {
 }
 let loading: Promise<void> | undefined;
 let loadedUrl: string | undefined;
+// Official payment-page URLs: https://epayment.kz/ru/docs/platezhnaya-stranica
+const SCRIPT_URLS = new Set([
+  "https://test-epay.epayment.kz/payform/payment-api.js",
+  "https://epay.homebank.kz/payform/payment-api.js",
+]);
 export async function launchHalyk(session: PaymentSession) {
   if (!session.scriptUrl || !session.payment) throw new Error("Не удалось получить данные платёжной сессии.");
   const url = new URL(session.scriptUrl);
-  if (url.protocol !== "https:") throw new Error("Платёжный скрипт должен загружаться по HTTPS.");
+  if (!SCRIPT_URLS.has(url.href)) throw new Error("Адрес платёжного скрипта не разрешён.");
   if (!loading || loadedUrl !== url.href) {
     loadedUrl = url.href;
     loading = new Promise<void>((resolve, reject) => {

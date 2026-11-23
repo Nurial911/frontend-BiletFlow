@@ -14,8 +14,8 @@ export function onAuthFailure(listener: (message: string) => void) {
   authFailureListeners.add(listener);
   return () => { authFailureListeners.delete(listener); };
 }
-function rejectAuthentication(status: number, message: string, token: string | null) {
-  if (token && getToken() === token && (status === 401 || status === 403)) {
+function rejectAuthentication(status: number, message: string, code: string | undefined, token: string | null) {
+  if (token && getToken() === token && (status === 401 || (status === 403 && code === "ACCOUNT_SUSPENDED"))) {
     clearToken();
     authFailureListeners.forEach(listener => listener(message));
   }
@@ -23,9 +23,11 @@ function rejectAuthentication(status: number, message: string, token: string | n
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -58,9 +60,9 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    rejectAuthentication(response.status, message, token);
-    throw new ApiError(response.status, message);
+    const { message, code } = await readError(response);
+    rejectAuthentication(response.status, message, code, token);
+    throw new ApiError(response.status, message, code);
   }
 
   const text = await response.text();
@@ -79,24 +81,30 @@ export async function apiBlob(path: string): Promise<Blob> {
     throw new ApiError(0, "Нет связи с сервером. Проверьте интернет.");
   }
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    rejectAuthentication(response.status, message, token);
-    throw new ApiError(response.status, message);
+    const { message, code } = await readError(response);
+    rejectAuthentication(response.status, message, code, token);
+    throw new ApiError(response.status, message, code);
   }
   return response.blob();
 }
 
 // The backend's error format is not documented in Swagger yet, so we try
 // the common shapes and fall back to a message based on the status code.
-async function readErrorMessage(response: Response): Promise<string> {
+async function readError(response: Response): Promise<{ message: string; code?: string }> {
   try {
     const data = await response.json();
     const msg = data?.message ?? data?.error?.message ?? data?.detail ?? data?.error;
-    if (typeof msg === "string" && msg.length > 0) return msg;
+    const rawCode = data?.code ?? data?.error?.code;
+    const code = typeof rawCode === "string" ? rawCode : undefined;
+    if (typeof msg === "string" && msg.length > 0) return { message: msg, code };
+    return { message: fallbackMessage(response.status), code };
   } catch {
     /* body was not JSON */
   }
-  switch (response.status) {
+  return { message: fallbackMessage(response.status) };
+}
+function fallbackMessage(status: number) {
+  switch (status) {
     case 400: return "Проверьте введённые данные.";
     case 401: return "Нужно войти в аккаунт.";
     case 402: return "Оплата отклонена. Заказ ожидает оплаты; можно повторить попытку.";

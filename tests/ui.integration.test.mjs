@@ -20,6 +20,17 @@ await build({ stdin: { contents: `
   import { OrderItemsList } from './src/components/orders/OrderItemsList';
   import { CheckInResultCard } from './src/components/checkin/CheckInResultCard';
   export { readEventForm } from './src/pages/OrganizerPage';
+  import { EventSalesAnalytics } from './src/components/analytics/SalesInsights';
+  export async function renderAnalytics(eventId, seeds) {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    for (const [key,value] of seeds) client.setQueryData(key,value);
+    const stream = await renderToReadableStream(React.createElement(QueryClientProvider, { client },
+      React.createElement(EventSalesAnalytics, { eventId }, sales => React.createElement(EventSalesDetail, { sales }))));
+    await stream.allReady;
+    const html = await new Response(stream).text();
+    client.clear();
+    return html;
+  }
   export async function renderSeatMap(map, seats) {
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     client.setQueryData(['seat-section', 7, 1], { section: map.sections[0], seats });
@@ -59,7 +70,7 @@ await build({ stdin: { contents: `
     return html;
   }
 `, resolveDir: process.cwd() }, bundle: true, packages: "external", platform: "node", format: "esm", outfile });
-const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems, renderCheckInResult, readEventForm } = await import(pathToFileURL(outfile));
+const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems, renderCheckInResult, readEventForm, renderAnalytics } = await import(pathToFileURL(outfile));
 const attendee = { id: 2, email: "attendee@test.invalid", role: "ATTENDEE", verificationStatus: true };
 const organizer = { ...attendee, id: 1, role: "ORGANIZER" };
 const admin = { ...attendee, id: 9, role: "PLATFORM_ADMIN" };
@@ -384,8 +395,8 @@ test("editing an event keeps its saved category, including values outside the li
   assert.match(legacySelect, /value="Festival"[^>]*>Festivals</);
 });
 
-test("calendar and report actions appear on visible events, with no self-report or cancelled-calendar links", async () => {
-  const seeds = [[["event", 7], { ...event, organizerId: 5 }], [["ticket-types", 7], []]];
+test("calendar and report actions use the event owner user ID and expose cancellation downloads", async () => {
+  const seeds = [[["event", 7], { ...event, organizerId: organizer.id }], [["ticket-types", 7], []]];
   const attendeeHtml = await renderRoute("/events/7", attendee, seeds);
   assert.match(attendeeHtml, /Добавить в календарь/);
   assert.match(attendeeHtml, /Пожаловаться на событие/);
@@ -393,6 +404,9 @@ test("calendar and report actions appear on visible events, with no self-report 
   assert.doesNotMatch(ownHtml, /Пожаловаться на событие/);
   const cancelled = await renderRoute("/events/7", attendee, [...seeds, [["event", 7], { ...event, status: "CANCELLED" }]]);
   assert.doesNotMatch(cancelled, /Добавить в календарь/);
+  assert.match(cancelled, /Скачать отмену события/);
+  const otherEvent = await renderRoute("/events/7", organizer, [...seeds, [["event",7],{ ...event, organizerId: 5 }], [["organizer-profile"],{ id:5, userId:organizer.id }]]);
+  assert.match(otherEvent, /Пожаловаться на событие/);
 });
 test("assigned event ticket creation derives quantity from sections and locks venue and capacity editing", async () => {
   const assigned = { ...event, seatingMode: "ASSIGNED", venue: { id: 1, name: "Hall", address: "Astana", capacity: 488 }, capacity: 488 };
@@ -523,4 +537,64 @@ test("cancelled and refunded tickets show no QR code and are marked invalid for 
   assert.equal((html.match(/QR-код недействителен для входа\./g) ?? []).length, 2);
   assert.match(html, /Билет отменён/);
   assert.match(html, /Билет возвращён/);
+});
+
+test("drafts have organizer preview links, a private-draft banner and disabled checkout", async () => {
+  const draft = { ...event, status:"DRAFT", organizerId:organizer.id };
+  const list = await renderRoute("/organizer/events",organizer,[[["organizer-profile","ORGANIZER"],{ id:99,userId:organizer.id }],[["organizer-events",organizer.id,0],page([draft])]]);
+  assert.match(list,/href="\/events\/7\?preview=1"/);
+  const html = await renderRoute("/events/7?preview=1&lang=en",organizer,[[["event",7],draft],[["ticket-types",7],[{ id:4,name:"Free",price:0,available:10 }]]]);
+  assert.match(html,/Draft — not published/);
+  assert.match(html,/<button[^>]*disabled=""[^>]*>Choose tickets<\/button>/);
+  assert.doesNotMatch(html,/Report event/);
+});
+
+test("registration windows block both choosing and adding tickets, and display the event end time", async () => {
+  const current = Date.now();
+  const future = offset => new Date(current + offset).toISOString();
+  const types = [{ id:4,name:"Free",price:0,available:10,hidden:false }];
+  for (const [opening,closing,message] of [[future(3600000),future(7200000),"Registration has not opened yet"],[future(-7200000),future(-3600000),"Registration is closed"]]) {
+    const html = await renderRoute("/events/7?lang=en",attendee,[[["event",7],{ ...event,startTime:future(10800000),endTime:future(14400000),registrationOpeningTime:opening,registrationClosingTime:closing }],[["ticket-types",7],types]]);
+    assert.ok(html.includes(message));
+    assert.match(html,/Registration opens:/);
+    assert.match(html,/Registration closes:/);
+    assert.match(html,/Ends:/);
+    assert.match(html,/<button[^>]*disabled=""[^>]*>Choose tickets<\/button>/);
+    assert.match(html,/<button[^>]*disabled=""[^>]*aria-label="Add a Free ticket"/);
+  }
+});
+
+test("paid confirmation offers calendar actions while pending confirmation does not", async () => {
+  const seeds = [[["order",42],{ ...order,status:"PAID" }],[["order-payments",42],[]]];
+  const html = await renderRoute("/orders/42?lang=en",attendee,seeds);
+  assert.match(html,/Add to calendar/);
+  const pending = await renderRoute("/orders/42?lang=en",attendee,[[["order",42],order],[["order-payments",42],[]]]);
+  assert.doesNotMatch(pending,/Add to calendar/);
+});
+
+test("ticket cancellation and refund do not imply event cancellation; calendar metadata decides", async () => {
+  const ticket = { id:5,eventId:7,eventTitle:"Jazz",ticketTypeName:"Standard",attendeeEmail:attendee.email,orderId:42,status:"REFUNDED" };
+  const seeds = [[["my-orders",0],page([])],[["my-tickets",0],page([ticket])]];
+  const active = await renderRoute("/account?lang=en",attendee,[...seeds,[["calendar",7],{ cancelled:false }]]);
+  assert.match(active,/Add to calendar/);
+  assert.doesNotMatch(active,/Download event cancellation/);
+  const cancelled = await renderRoute("/account?lang=en",attendee,[...seeds,[["calendar",7],{ cancelled:true }]]);
+  assert.match(cancelled,/Download event cancellation \(.ics\)/);
+  assert.doesNotMatch(cancelled,/Add to calendar/);
+});
+
+test("sales analytics include real filter controls, server inventory metrics and all-time campaign attribution", async () => {
+  const data = { ...event,eventId:7,eventTitle:"Jazz",capacity:100,ticketsRemaining:12,percentSold:50,paidOrders:2,cancelledOrders:0,expiredOrders:0,revenue:10000,discounts:1000,netRevenue:9000,processingFees:200,estimatedPayout:8800,salesByDay:[] };
+  const html = await renderAnalytics(7,[[["organizer-sales-detail",7],data],[["ticket-types",7],[{ id:4,name:"Авторский VIP" }]],[["campaigns",7],[{ id:2,name:"Авторская кампания",code:"PROMO",redemptions:3,ticketsSold:4,grossRevenue:12345,discountAmount:345,netRevenue:12000 }]]]);
+  assert.match(html,/name="from"/);
+  assert.match(html,/name="to"/);
+  assert.match(html,/name="ticketTypeId"/);
+  assert.match(html,/value="4"/);
+  assert.match(html,/Авторский VIP/);
+  assert.match(html,/Итоги и остатки показаны за всё время/);
+  assert.match(html,/Остаток вместимости/);
+  assert.match(html,/50%/);
+  assert.match(html,/Авторская кампания/);
+  assert.match(html,/12.?345/);
+  assert.match(html,/12.?000/);
 });

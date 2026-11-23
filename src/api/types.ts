@@ -50,6 +50,8 @@ export interface DailySales {
 }
 
 export interface EventSales {
+  ticketsRemaining?: number | null;
+  percentSold?: number | null;
   refunds?: number;
   refundedOrders?: number;
   ticketsRefunded?: number;
@@ -63,7 +65,7 @@ export interface EventSales {
   suspended: boolean;
   startTime: string;
   endTime?: string;
-  capacity?: number;
+  capacity?: number | null;
   paidOrders: number;
   pendingOrders: number;
   cancelledOrders: number;
