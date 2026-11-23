@@ -10,11 +10,12 @@ import { cityLabel, venueCity } from "../../lib/cities";
 export function EventCard({ event }: { event: Event }) {
   const { t, locale, language } = useLanguage();
   const city = venueCity(event.venue);
-  // The event has no price field yet, so each card asks for its ticket types.
-  // When the backend adds `minPrice` to events, delete these two lines.
-  const { data: types } = useTicketTypes(event.id);
-  const price = minPrice(types);
-  const ticketsNotRequired = event.status === "PUBLISHED" && types !== undefined && types.length === 0;
+  // Until the backend sends `minPrice` on events, each card asks for its ticket types.
+  // When it does, the card uses that field and makes no request.
+  const serverPrice = event.minPrice !== undefined;
+  const { data: types } = useTicketTypes(event.id, !serverPrice);
+  const price = serverPrice ? event.minPrice ?? null : minPrice(types);
+  const ticketsNotRequired = !serverPrice && event.status === "PUBLISHED" && types !== undefined && types.length === 0;
 
   return (
     <Link

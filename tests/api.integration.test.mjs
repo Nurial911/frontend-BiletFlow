@@ -53,6 +53,17 @@ beforeEach(() => {
 });
 afterEach(() => assert.equal(expected.length, 0, "All expected requests must have been made"));
 
+test("the catalog loads every page of events instead of stopping at the first 100", async () => {
+  const events100 = from => Array.from({ length: 100 }, (_, i) => ({ id: from + i }));
+  request("/api/events?page=0&size=100", "GET", undefined, { content: events100(1), totalPages: 3, number: 0, last: false });
+  request("/api/events?page=1&size=100", "GET", undefined, { content: events100(101), totalPages: 3, number: 1, last: false });
+  request("/api/events?page=2&size=100", "GET", undefined, { content: [{ id: 201 }], totalPages: 3, number: 2, last: true });
+  const all = await events.getAllEvents();
+  assert.equal(all.content.length, 201);
+  assert.equal(all.content.at(-1).id, 201);
+  request("/api/events?page=0&size=100", "GET", undefined, { content: [{ id: 1 }], totalPages: 1, number: 0, last: true });
+  assert.equal((await events.getAllEvents()).content.length, 1);
+});
 test("calendar links and calendar downloads use authenticated API requests", async () => {
   request("/api/events/7/calendar", "GET", undefined, { cancelled: false, googleCalendarUrl: "https://calendar.google.com/calendar/render" });
   assert.equal((await platform.getCalendar(7)).cancelled, false);

@@ -15,10 +15,23 @@ import type {
 } from "./types";
 
 // GET /api/events — the backend has no filters yet (city, date, category, search),
-// so we load one big page and filter in the browser. Replace this when the
+// so the catalog loads every page and filters in the browser. Replace this when the
 // backend adds query parameters.
 export const getEvents = (page = 0, size = 100) =>
   api<Page<Event>>(`/api/events?page=${page}&size=${size}`);
+
+// Every page of /api/events, so the catalog is not cut off at the first 100 events.
+// Stops at the last page; the page limit only guards against a backend that never reports one.
+export async function getAllEvents(size = 100, maxPages = 50): Promise<Page<Event>> {
+  const first = await getEvents(0, size);
+  const content = [...first.content];
+  let current = first;
+  for (let page = 1; page < maxPages && !current.last && page < current.totalPages && current.content.length > 0; page++) {
+    current = await getEvents(page, size);
+    content.push(...current.content);
+  }
+  return { ...first, content, last: true };
+}
 
 // GET /api/events/{id}
 export const getEvent = (id: number) => api<Event>(`/api/events/${id}`);

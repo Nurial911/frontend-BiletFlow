@@ -251,6 +251,8 @@ export interface Event {
   posterUrl?: string | null;
   // ASSIGNED: buy seated sections on the seat map (see api/seating.ts)
   seatingMode?: "GENERAL_ADMISSION" | "ASSIGNED";
+  // Cheapest visible ticket price, once the backend sends it (null: no tickets on sale).
+  minPrice?: number | null;
 }
 
 export interface TicketType {
