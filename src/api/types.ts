@@ -352,11 +352,14 @@ export interface CheckInStats {
   notCheckedIn: number;
 }
 
+// Backend CheckInResult enum. Only CHECKED_IN admits the attendee.
+export type CheckInOutcome = "CHECKED_IN" | "ALREADY_USED" | "CANCELLED" | "REFUNDED" | "WRONG_EVENT" | "INVALID";
+
 export interface CheckInResult {
-  result: string;
+  result: CheckInOutcome;
   message: string;
-  checkedInAt?: string;
-  ticket: Ticket;
+  checkedInAt?: string | null;
+  ticket: Ticket | null; // null for INVALID and WRONG_EVENT
 }
 
 export interface EventStaff {

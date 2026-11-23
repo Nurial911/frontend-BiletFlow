@@ -13,6 +13,7 @@ const bundle = await build({ stdin: { contents: `
   export * as support from './src/api/support';
   export * as notifications from './src/api/notifications';
   export * as events from './src/api/events';
+  export * as checkIn from './src/api/checkIn';
   export * as catalog from './src/lib/cities';
   export * as venueForms from './src/lib/venues';
   export * as languageUtils from './src/lib/language';
@@ -21,7 +22,7 @@ const bundle = await build({ stdin: { contents: `
   export { startOrderPayment } from './src/lib/checkout';
   export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } from './src/lib/format';
 `, resolveDir: process.cwd() }, bundle: true, platform: "node", format: "esm", write: false });
-const { orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { checkIn, orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 let expected;
 let requests;
@@ -402,4 +403,13 @@ test("becoming an organizer sends contact information and returns the new organi
   const created = await events.createOrganizerProfile("+7 700 000 00 00");
   assert.equal(created.accessToken, "organizer-token");
   assert.equal(created.profile.verificationStatus, "UNVERIFIED");
+});
+
+test("check-in scans send the ticket code and undo returns the updated ticket", async () => {
+  request("/api/check-in/events/7/scan", "POST", { code: "T-1" }, { result: "ALREADY_USED", message: "Already used", checkedInAt: "2026-11-22T00:47:00", ticket: { id: 5, status: "USED" } });
+  const scanned = await checkIn.scanEventTicket(7, "T-1");
+  assert.equal(scanned.result, "ALREADY_USED");
+  assert.equal(scanned.ticket.id, 5);
+  request("/api/check-in/events/7/tickets/5/undo", "POST", undefined, { id: 5, status: "VALID" });
+  assert.equal((await checkIn.undoEventCheckIn(7, 5)).status, "VALID");
 });

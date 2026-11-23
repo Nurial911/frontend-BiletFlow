@@ -18,6 +18,7 @@ await build({ stdin: { contents: `
   import { EventSuspensionDialog } from './src/components/events/EventSuspensionDialog';
   import { SeatMapPicker } from './src/components/events/SeatMapPicker';
   import { OrderItemsList } from './src/components/orders/OrderItemsList';
+  import { CheckInResultCard } from './src/components/checkin/CheckInResultCard';
   export async function renderSeatMap(map, seats) {
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     client.setQueryData(['seat-section', 7, 1], { section: map.sections[0], seats });
@@ -30,6 +31,9 @@ await build({ stdin: { contents: `
   }
   export function renderSuspensionDialog(pending = false, error = null) {
     return renderToString(React.createElement(EventSuspensionDialog, { event: { id: 1, title: 'Free Java Workshop' }, pending, error, onConfirm() {}, onClose() {} }));
+  }
+  export function renderCheckInResult(result) {
+    return renderToString(React.createElement(CheckInResultCard, { result }));
   }
   export function renderOrderItems(items) {
     return renderToString(React.createElement(OrderItemsList, { items }));
@@ -54,7 +58,7 @@ await build({ stdin: { contents: `
     return html;
   }
 `, resolveDir: process.cwd() }, bundle: true, packages: "external", platform: "node", format: "esm", outfile });
-const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems } = await import(pathToFileURL(outfile));
+const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems, renderCheckInResult } = await import(pathToFileURL(outfile));
 const attendee = { id: 2, email: "attendee@test.invalid", role: "ATTENDEE", verificationStatus: true };
 const organizer = { ...attendee, id: 1, role: "ORGANIZER" };
 const admin = { ...attendee, id: 9, role: "PLATFORM_ADMIN" };
@@ -420,4 +424,40 @@ test("organizer order lines show every seat of one ticket type without duplicate
     assert.match(html, /Танцпол × 2/);
     assert.equal(errors.filter(e => /same key/.test(e)).length, 0);
   } finally { console.error = original; }
+});
+
+test("check-in results are clearly distinct for every scan outcome", () => {
+  const ticket = { id: 5, code: "T-1", status: "USED", ticketTypeName: "Fan field", attendeeEmail: "a@test.invalid", attendeeName: "Алия", seatLabel: null };
+  const titles = {
+    CHECKED_IN: "Проход разрешён",
+    ALREADY_USED: "Билет уже использован",
+    CANCELLED: "Билет отменён",
+    REFUNDED: "Билет возвращён",
+    WRONG_EVENT: "Билет на другое мероприятие",
+    INVALID: "Недействительный билет",
+  };
+  for (const [result, title] of Object.entries(titles)) {
+    const hasTicket = result !== "INVALID" && result !== "WRONG_EVENT";
+    const html = renderCheckInResult({ result, message: "", checkedInAt: "2026-11-22T00:47:00", ticket: hasTicket ? ticket : null }).replace(/<!-- -->/g, "");
+    assert.match(html, /role="alert"/);
+    assert.match(html, new RegExp(`data-result="${result}"`));
+    assert.match(html, new RegExp(title));
+    if (hasTicket) assert.match(html, /Алия · Fan field/);
+  }
+  assert.match(renderCheckInResult({ result: "ALREADY_USED", message: "", checkedInAt: "2026-11-22T00:47:00", ticket }), /Отмечен:/);
+  assert.match(renderCheckInResult({ result: "CHECKED_IN", message: "", ticket }), /bg-green-50/);
+  assert.match(renderCheckInResult({ result: "REFUNDED", message: "", ticket }), /bg-red-50/);
+});
+test("staff can check in a valid ticket found by search and undo only a used one", async () => {
+  const valid = { id: 5, code: "T-5", status: "VALID", ticketTypeName: "Fan field", attendeeEmail: "valid@test.invalid", eventId: 7, eventTitle: "Jazz", orderId: 1, ticketTypeId: 3 };
+  const used = { ...valid, id: 6, code: "T-6", status: "USED", attendeeEmail: "used@test.invalid", usedAt: "2026-11-22T00:47:00" };
+  const html = await renderRoute("/staff", organizer, [
+    [["assigned-events"], page([event])],
+    [["check-in-stats", 7], { eventId: 7, registered: 2, checkedIn: 1, notCheckedIn: 1 }],
+    [["event-attendees", 7, "", 0], page([valid, used])],
+  ]);
+  assert.equal((html.match(/Отметить проход/g) ?? []).length, 1);
+  assert.equal((html.match(/Отменить check-in/g) ?? []).length, 1);
+  assert.ok(html.indexOf("valid@test.invalid") < html.indexOf("Отметить проход"));
+  assert.ok(html.indexOf("used@test.invalid") < html.indexOf("Отменить check-in"));
 });
