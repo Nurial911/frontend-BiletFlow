@@ -51,6 +51,9 @@ export function MyAccountPage() {
     queryKey: ["my-tickets", ticketsPage],
     queryFn: () => getMyTickets(ticketsPage, PAGE_SIZE),
     enabled: isLoggedIn,
+    // Pick up a refund or cancellation made by the organizer while this page is open,
+    // so an already open QR code is hidden.
+    refetchInterval: 60_000,
   });
   const cancel = useMutation({
     mutationFn: (orderId: number) => cancelOrder(orderId),
@@ -427,8 +430,17 @@ function OrderRefundInfo({ orderId }: { orderId: number }) {
 
 function MyTicketCard({ ticket }: { ticket: Ticket }) {
   const { tx, statusLabel } = useLanguage();
+  const queryClient = useQueryClient();
   const pdf = useMutation({ mutationFn: async () => downloadBlob(await getTicketPdf(ticket.id), `biletflow-ticket-${ticket.id}.pdf`) });
   const [showQr, setShowQr] = useState(false);
+  // A cancelled or refunded ticket no longer admits anyone (SRS 4.7, 4.9): never show its QR,
+  // even if it was already open when the status changed, and drop the cached image.
+  const invalid = ticket.status === "CANCELLED" || ticket.status === "REFUNDED";
+  useEffect(() => {
+    if (!invalid) return;
+    setShowQr(false);
+    queryClient.removeQueries({ queryKey: ["ticket-qr", ticket.id] });
+  }, [invalid, ticket.id, queryClient]);
   const qr = useQuery({
     queryKey: ["ticket-qr", ticket.id],
     queryFn: async () => {
@@ -447,7 +459,7 @@ function MyTicketCard({ ticket }: { ticket: Ticket }) {
       const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
       return new Blob([bytes], { type: "image/png" });
     },
-    enabled: showQr,
+    enabled: showQr && !invalid,
     staleTime: 5 * 60 * 1000,
   });
   const qrUrl = useObjectUrl(qr.data);
@@ -461,15 +473,21 @@ function MyTicketCard({ ticket }: { ticket: Ticket }) {
       <p className="mt-2 text-sm">{tx("Статус: ")}{statusLabel(ticket.status)}</p>
       <p className="mt-1 text-sm">{ticket.attendeeName ?? ticket.attendeeEmail}</p>
       <p className="mt-1 text-xs text-muted">{tx("Билет №")}{ticket.id} {tx(" · Заказ №")}{ticket.orderId}</p>
-      <Button variant="secondary" className="mt-3" onClick={() => setShowQr((value) => !value)}>
-        {showQr ? tx("Скрыть QR-код") : tx("Показать QR-код")}
-      </Button>
-      <Button variant="secondary" className="mt-3 ml-2" disabled={pdf.isPending || ticket.status === "CANCELLED" || ticket.status === "REFUNDED"} onClick={() => pdf.mutate()}>{pdf.isPending ? tx("Загрузка…") : tx("Скачать билет PDF")}</Button>
+      {invalid ? (
+        <p role="status" data-qr-invalid="true" className="mt-3 rounded-lg border-2 border-red-600 bg-red-50 p-3 text-sm font-semibold text-red-900">
+          ✕ {ticket.status === "REFUNDED" ? tx("Билет возвращён") : tx("Билет отменён")}. {tx("QR-код недействителен для входа.")}
+        </p>
+      ) : (
+        <Button variant="secondary" className="mt-3" onClick={() => setShowQr((value) => !value)}>
+          {showQr ? tx("Скрыть QR-код") : tx("Показать QR-код")}
+        </Button>
+      )}
+      <Button variant="secondary" className={invalid ? "mt-3" : "mt-3 ml-2"} disabled={pdf.isPending || invalid} onClick={() => pdf.mutate()}>{pdf.isPending ? tx("Загрузка…") : tx("Скачать билет PDF")}</Button>
       {pdf.error && <ApiErrorMessage error={pdf.error} />}
       <Link to={`/support/new?ticketId=${ticket.id}`} className="mt-3 block text-sm underline">{tx("Помощь с билетом")}</Link>
-      {showQr && qr.isLoading && <p className="mt-3 text-sm text-muted">{tx("Загружаем QR-код…")}</p>}
-      {showQr && qr.error && <ApiErrorMessage error={qr.error} />}
-      {showQr && qrUrl && <img src={qrUrl} alt={tx("QR-код билета {0}", [ticket.id])} className="mt-3 h-48 w-48 rounded border bg-white p-2" />}
+      {showQr && !invalid && qr.isLoading && <p className="mt-3 text-sm text-muted">{tx("Загружаем QR-код…")}</p>}
+      {showQr && !invalid && qr.error && <ApiErrorMessage error={qr.error} />}
+      {showQr && !invalid && qrUrl && <img src={qrUrl} alt={tx("QR-код билета {0}", [ticket.id])} className="mt-3 h-48 w-48 rounded border bg-white p-2" />}
     </article>
   );
 }
