@@ -334,6 +334,26 @@ test("editing a legacy event without a city keeps its existing venue available",
   assert.match(html, /Legacy hall/);
   assert.match(html, /The current venue has no specified city/);
 });
+test("event category is chosen from the agreed list in every language", async () => {
+  const html = await renderRoute("/organizer/create?lang=kk", organizer, translatedPageSeeds);
+  assert.doesNotMatch(html, /<input[^>]*name="category"/);
+  const select = html.match(/<select[^>]*name="category"[\s\S]*?<\/select>/)?.[0] ?? "";
+  assert.equal((select.match(/<option /g) ?? []).length, 15);
+  assert.match(select, /value="Technology"[^>]*>Технологиялар</);
+  assert.match(select, /value="Other"[^>]*>Басқа</);
+  const english = await renderRoute("/organizer/create?lang=en", organizer, translatedPageSeeds);
+  assert.match(english, /value="Social"[^>]*>Meetups</);
+});
+test("editing an event keeps its saved category, including values outside the list", async () => {
+  const upper = await renderRoute("/organizer/events/7/edit?lang=en", organizer, translatedPageSeeds);
+  const upperSelect = upper.match(/<select[^>]*name="category"[\s\S]*?<\/select>/)?.[0] ?? "";
+  assert.match(upperSelect, /value="MUSIC" selected=""[^>]*>Music</);
+  assert.doesNotMatch(upperSelect, /value="Music"/);
+  const legacy = await renderRoute("/organizer/events/7/edit?lang=en", organizer, [...translatedPageSeeds, [["event", 7], { ...event, category: "Festivals" }]]);
+  const legacySelect = legacy.match(/<select[^>]*name="category"[\s\S]*?<\/select>/)?.[0] ?? "";
+  assert.match(legacySelect, /value="Festivals" selected=""[^>]*>Festivals · current value</);
+  assert.match(legacySelect, /value="Festival"[^>]*>Festivals</);
+});
 
 test("calendar and report actions appear on visible events, with no self-report or cancelled-calendar links", async () => {
   const seeds = [[["event", 7], { ...event, organizerId: 5 }], [["ticket-types", 7], []]];
