@@ -1,5 +1,6 @@
 import { getAdminEvents } from "../api/platform";
 import { CalendarMenu } from "../components/events/EventExtras";
+import { CheckInResultCard } from "../components/checkin/CheckInResultCard";
 import { UserSuspensionControls } from "../components/auth/UserSuspensionControls";
 import { useLanguage } from "../i18n/LanguageContext";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -31,7 +32,7 @@ import { Button } from "../components/ui/Button";
 import { Modal } from "../components/ui/Modal";
 import { EventSuspensionDialog } from "../components/events/EventSuspensionDialog";
 import { formatPrice, formatLongDate, formatDateTime } from "../lib/format";
-import type { Order, Ticket, User } from "../api/types";
+import type { CheckInResult, Order, Ticket, User } from "../api/types";
 
 const PAGE_SIZE = 20;
 
@@ -487,6 +488,8 @@ export function EventCheckInPage() {
   const [page, setPage] = useState(0);
   const [code, setCode] = useState("");
   const [scanMessage, setScanMessage] = useState("");
+  // The outcome of the last scan or manual check-in, shown as a large result card.
+  const [lastResult, setLastResult] = useState<CheckInResult | null>(null);
   const queryClient = useQueryClient();
   const stats = useQuery({
     queryKey: ["check-in-stats", eventId],
@@ -501,19 +504,25 @@ export function EventCheckInPage() {
   const scan = useMutation({
     mutationFn: (ticketCode: string) => scanEventTicket(eventId, ticketCode),
     onSuccess: async (result) => {
-      setScanMessage(tx(result.message) || tx("Проверка завершена: {0}", [result.result]));
+      setScanMessage("");
+      setLastResult(result);
       setCode("");
+      document.getElementById("check-in-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["check-in-stats", eventId] }),
         queryClient.invalidateQueries({ queryKey: ["event-attendees", eventId] }),
       ]);
     },
-    onError: (error) => setScanMessage(error instanceof Error ? tx(error.message) : tx("Не удалось проверить билет.")),
+    onError: (error) => {
+      setLastResult(null);
+      setScanMessage(error instanceof Error ? tx(error.message) : tx("Не удалось проверить билет."));
+    },
   });
   const undo = useMutation({
     mutationFn: (ticketId: number) => undoEventCheckIn(eventId, ticketId),
-    onSuccess: async (result) => {
-      setScanMessage(tx(result.message) || tx("Отметка о проходе отменена."));
+    onSuccess: async () => {
+      setLastResult(null);
+      setScanMessage(tx("Отметка о проходе отменена."));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["check-in-stats", eventId] }),
         queryClient.invalidateQueries({ queryKey: ["event-attendees", eventId] }),
@@ -536,6 +545,9 @@ export function EventCheckInPage() {
     setScanMessage("");
     scan.mutate(ticketCode);
   };
+  const confirmUndo = (ticket: Ticket) => {
+    if (window.confirm(tx("Отменить проход для билета №{0}?", [ticket.id]))) undo.mutate(ticket.id);
+  };
 
   return (
     <section className="space-y-5">
@@ -546,7 +558,7 @@ export function EventCheckInPage() {
       {events.length === 0 ? <Empty text={tx("Вам пока не назначили мероприятия.")} /> : (
         <>
           <label className="block max-w-xl text-sm font-medium">
-            {tx("Мероприятие")}<select value={eventId} onChange={(event) => { setSelectedId(Number(event.target.value)); setPage(0); }} className="mt-1 block w-full rounded-lg border px-3 py-2">
+            {tx("Мероприятие")}<select value={eventId} onChange={(event) => { setSelectedId(Number(event.target.value)); setPage(0); setLastResult(null); setScanMessage(""); }} className="mt-1 block w-full rounded-lg border px-3 py-2">
               {events.map((event) => <option key={event.id} value={event.id}>{event.title}</option>)}
             </select>
           </label>
@@ -565,7 +577,7 @@ export function EventCheckInPage() {
               <input autoComplete="off" value={code} onChange={(event) => setCode(event.target.value)} placeholder={tx("Код билета")} className="min-w-60 flex-1 rounded-lg border px-3 py-2 text-sm" />
               <Button type="submit" disabled={!code.trim() || scan.isPending}>{scan.isPending ? tx("Проверяем…") : tx("Проверить")}</Button>
             </div>
-            {scan.data?.ticket?.seatLabel && <p className="mt-2 font-semibold">{scan.data.ticket.seatLabel}</p>}
+            {lastResult && <CheckInResultCard result={lastResult} />}
             {scanMessage && <p role="status" className="mt-3 rounded-md bg-surface p-3 text-sm">{tx(scanMessage)}</p>}
             {undo.error && <ApiErrorMessage error={undo.error} />}
           </form>
@@ -580,7 +592,7 @@ export function EventCheckInPage() {
                 {(attendees.data?.content ?? []).length === 0 ? <Empty text={tx("Участники не найдены.")} /> : (
                   <div className="mt-3 space-y-2">
                     {(attendees.data?.content ?? []).map((ticket) => (
-                      <AttendeeRow key={ticket.id} ticket={ticket} pending={undo.isPending} onUndo={() => undo.mutate(ticket.id)} />
+                      <AttendeeRow key={ticket.id} ticket={ticket} pending={undo.isPending || scan.isPending} onCheckIn={() => { setScanMessage(""); scan.mutate(ticket.code); }} onUndo={() => confirmUndo(ticket)} />
                     ))}
                   </div>
                 )}
@@ -594,7 +606,7 @@ export function EventCheckInPage() {
   );
 }
 
-function AttendeeRow({ ticket, pending, onUndo }: { ticket: Ticket; pending: boolean; onUndo: () => void }) {
+function AttendeeRow({ ticket, pending, onCheckIn, onUndo }: { ticket: Ticket; pending: boolean; onCheckIn: () => void; onUndo: () => void }) {
   const { tx, locale, statusLabel } = useLanguage();
   return (
     <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
@@ -604,6 +616,7 @@ function AttendeeRow({ ticket, pending, onUndo }: { ticket: Ticket; pending: boo
         <p className="text-sm text-muted">{ticket.ticketTypeName}{ticket.seatLabel ? ` · ${ticket.seatLabel}` : ""} {tx(" · Билет №")}{ticket.id} · {statusLabel(ticket.status)}</p>
         {ticket.usedAt && <p className="text-xs text-muted">{tx("Отмечен: ")}{formatDateTime(ticket.usedAt, locale)}</p>}
       </div>
+      {ticket.status === "VALID" && <Button disabled={pending} onClick={onCheckIn}>{tx("Отметить проход")}</Button>}
       {ticket.status === "USED" && <Button variant="secondary" disabled={pending} onClick={onUndo}>{tx("Отменить check-in")}</Button>}
     </article>
   );

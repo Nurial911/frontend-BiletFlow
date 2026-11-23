@@ -12,8 +12,9 @@ export const getEventAttendees = (eventId: number, query = "", page = 0, size = 
 export const scanEventTicket = (eventId: number, code: string) =>
   api<CheckInResult>(`/api/check-in/events/${eventId}/scan`, { method: "POST", body: { code } });
 
+// The backend answers an undo with the updated ticket (status VALID again), not a scan result.
 export const undoEventCheckIn = (eventId: number, ticketId: number) =>
-  api<CheckInResult>(`/api/check-in/events/${eventId}/tickets/${ticketId}/undo`, { method: "POST" });
+  api<Ticket>(`/api/check-in/events/${eventId}/tickets/${ticketId}/undo`, { method: "POST" });
 
 export const getEventCheckInStats = (eventId: number) =>
   api<CheckInStats>(`/api/check-in/events/${eventId}/stats`);
