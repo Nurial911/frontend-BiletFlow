@@ -43,7 +43,7 @@ import { Modal } from "../components/ui/Modal";
 import { EventPoster } from "../components/events/EventPoster";
 import { EventSuspensionDialog } from "../components/events/EventSuspensionDialog";
 import { formatTicketSalesEnd, getEventTicketSaleState, getTicketSaleState } from "../lib/ticketSales";
-import { formatDateTime } from "../lib/format";
+import { categoryLabel, eventCategoryOptions, formatDateTime } from "../lib/format";
 import { cities, venueCity } from "../lib/cities";
 import { prepareVenueRequest, validateEventVenue, venuesInCity } from "../lib/venues";
 
@@ -913,7 +913,7 @@ export function OrganizerEventForm({
   onCancel?: () => void;
   onSubmit: (request: CreateEventRequest) => void;
 }) {
-  const { tx, language } = useLanguage();
+  const { tx, language, locale } = useLanguage();
   const [validationError, setValidationError] = useState("");
   const [selectedCityId, setSelectedCityId] = useState(() => event?.venue ? venueCity(event.venue) ?? "unknown" : "");
   const [selectedVenueId, setSelectedVenueId] = useState(event?.venue?.id ? String(event.venue.id) : "");
@@ -1001,7 +1001,14 @@ export function OrganizerEventForm({
         <input name="title" required maxLength={200} defaultValue={event?.title ?? ""} className={fieldClass} />
       </FormField>
       <FormField label={tx("Категория")}>
-        <input name="category" required defaultValue={event?.category ?? ""} className={fieldClass} placeholder={tx("Например, Концерт")} />
+        <select name="category" required defaultValue={event?.category ?? ""} className={fieldClass}>
+          <option value="" disabled>{tx("Выберите категорию")}</option>
+          {eventCategoryOptions(event?.category).map(option => (
+            <option key={option.value} value={option.value}>
+              {option.legacy ? `${categoryLabel(option.value, locale)} · ${tx("текущее значение")}` : categoryLabel(option.value, locale)}
+            </option>
+          ))}
+        </select>
       </FormField>
       <FormField label={tx("Описание")}>
         <textarea name="description" rows={4} defaultValue={event?.description ?? ""} className={fieldClass} />

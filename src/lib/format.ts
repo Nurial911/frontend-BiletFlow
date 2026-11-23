@@ -76,6 +76,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   education: "Образование",
   music: "Музыка",
   festival: "Фестивали",
+  technology: "Технологии",
+  social: "Встречи",
+  party: "Вечеринки", parties: "Вечеринки",
+  other: "Другое",
 };
 
 const LOCALIZED_CATEGORIES: Record<string, { kk: string; en: string }> = {
@@ -83,6 +87,7 @@ const LOCALIZED_CATEGORIES: Record<string, { kk: string; en: string }> = {
   "Юмор": { kk: "Әзіл", en: "Comedy" }, "Музеи и Выставки": { kk: "Мұражайлар мен көрмелер", en: "Museums and exhibitions" },
   "Детям": { kk: "Балаларға", en: "For children" }, "Спорт": { kk: "Спорт", en: "Sport" }, "Досуг": { kk: "Демалыс", en: "Leisure" },
   "Шоу": { kk: "Шоу", en: "Shows" }, "Образование": { kk: "Білім", en: "Education" }, "Музыка": { kk: "Музыка", en: "Music" }, "Фестивали": { kk: "Фестивальдер", en: "Festivals" },
+  "Технологии": { kk: "Технологиялар", en: "Technology" }, "Встречи": { kk: "Кездесулер", en: "Meetups" }, "Вечеринки": { kk: "Кештер", en: "Parties" }, "Другое": { kk: "Басқа", en: "Other" },
 };
 const CATEGORY_ALIASES: Record<string, string> = { "концерт": "Концерты", "театр": "Театры", "музей": "Музеи и Выставки", "выставка": "Музеи и Выставки", "фестиваль": "Фестивали" };
 export function categoryLabel(category: string, locale = "ru-RU"): string {
@@ -90,4 +95,23 @@ export function categoryLabel(category: string, locale = "ru-RU"): string {
   const known = CATEGORY_LABELS[key] ?? CATEGORY_ALIASES[key] ?? Object.keys(LOCALIZED_CATEGORIES).find(label => label.toLowerCase() === key);
   if (known) return locale.startsWith("kk") ? LOCALIZED_CATEGORIES[known]?.kk ?? known : locale.startsWith("en") ? LOCALIZED_CATEGORIES[known]?.en ?? known : known;
   return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+// Agreed category list for the event form. The English code is what gets saved;
+// categoryLabel shows it in Russian, Kazakh or English.
+export const EVENT_CATEGORIES = [
+  "Music", "Concert", "Festival", "Theatre", "Cinema", "Comedy", "Exhibition",
+  "Kids", "Sport", "Education", "Technology", "Social", "Party", "Other",
+] as const;
+
+// Options for the category dropdown. When editing, the saved value is kept exactly:
+// a list entry with a different letter case is replaced by it, and a value that is
+// not in the list is added as an extra option marked legacy.
+export function eventCategoryOptions(current?: string | null): { value: string; legacy: boolean }[] {
+  const options = EVENT_CATEGORIES.map(value => ({ value: value as string, legacy: false }));
+  if (!current) return options;
+  const index = options.findIndex(option => option.value.toLowerCase() === current.trim().toLowerCase());
+  if (index >= 0) options[index] = { value: current, legacy: false };
+  else options.push({ value: current, legacy: true });
+  return options;
 }
