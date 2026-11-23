@@ -17,6 +17,7 @@ await build({ stdin: { contents: `
   import { EventSalesDetail } from './src/pages/OrganizerInsightsPage';
   import { EventSuspensionDialog } from './src/components/events/EventSuspensionDialog';
   import { SeatMapPicker } from './src/components/events/SeatMapPicker';
+  import { OrderItemsList } from './src/components/orders/OrderItemsList';
   export async function renderSeatMap(map, seats) {
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     client.setQueryData(['seat-section', 7, 1], { section: map.sections[0], seats });
@@ -29,6 +30,9 @@ await build({ stdin: { contents: `
   }
   export function renderSuspensionDialog(pending = false, error = null) {
     return renderToString(React.createElement(EventSuspensionDialog, { event: { id: 1, title: 'Free Java Workshop' }, pending, error, onConfirm() {}, onClose() {} }));
+  }
+  export function renderOrderItems(items) {
+    return renderToString(React.createElement(OrderItemsList, { items }));
   }
   export function renderSalesDetail(sales) {
     return renderToString(React.createElement(EventSalesDetail, { sales }));
@@ -50,7 +54,7 @@ await build({ stdin: { contents: `
     return html;
   }
 `, resolveDir: process.cwd() }, bundle: true, packages: "external", platform: "node", format: "esm", outfile });
-const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap } = await import(pathToFileURL(outfile));
+const { renderRoute, renderSalesDetail, renderSuspensionDialog, renderSeatMap, renderOrderItems } = await import(pathToFileURL(outfile));
 const attendee = { id: 2, email: "attendee@test.invalid", role: "ATTENDEE", verificationStatus: true };
 const organizer = { ...attendee, id: 1, role: "ORGANIZER" };
 const admin = { ...attendee, id: 9, role: "PLATFORM_ADMIN" };
@@ -399,4 +403,21 @@ test("seat maps distinguish every server status and label accessible seats for k
   assert.match(html, /доступная среда/);
   assert.match(html, /data-seat-id="1"[^>]*tabindex="0"/);
   assert.match(html, /data-seat-id="4"[^>]*aria-disabled="true"/);
+});
+
+test("organizer order lines show every seat of one ticket type without duplicate React keys", () => {
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args.join(" "));
+  try {
+    const html = renderOrderItems([
+      { ticketTypeId: 3, ticketTypeName: "Партер", quantity: 1, unitPrice: 5000, seatId: 11, seatLabel: "Партер, ряд A, место 1" },
+      { ticketTypeId: 3, ticketTypeName: "Партер", quantity: 1, unitPrice: 5000, seatId: 12, seatLabel: "Партер, ряд A, место 2" },
+      { ticketTypeId: 4, ticketTypeName: "Танцпол", quantity: 2, unitPrice: 3000 },
+    ]);
+    assert.match(html, /ряд A, место 1/);
+    assert.match(html, /ряд A, место 2/);
+    assert.match(html, /Танцпол × 2/);
+    assert.equal(errors.filter(e => /same key/.test(e)).length, 0);
+  } finally { console.error = original; }
 });
