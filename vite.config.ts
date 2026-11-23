@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {
-      output: { manualChunks: { translations: ["./src/i18n/messages.json"] } },
+      output: { manualChunks: { translations: ["./src/i18n/messages.json"], vendor: ["react", "react-dom", "react-router-dom", "@tanstack/react-query"] } },
     },
   },
   server: {

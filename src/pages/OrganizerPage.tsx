@@ -1,3 +1,5 @@
+import { getSeatingLayouts } from "../api/seating";
+import { getAdminEvents } from "../api/platform";
 import { useLanguage } from "../i18n/LanguageContext";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
@@ -9,7 +11,6 @@ import {
   deleteEventPoster,
   duplicateEvent,
   getEvent,
-  getEvents,
   getMyEventsByPhase,
   getOrganizerEvents,
   getOrganizerProfile,
@@ -37,11 +38,14 @@ import type {
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Button, buttonClass } from "../components/ui/Button";
+import { BecomeOrganizerForm } from "../components/auth/BecomeOrganizerForm";
 import { Modal } from "../components/ui/Modal";
 import { EventPoster } from "../components/events/EventPoster";
 import { EventSuspensionDialog } from "../components/events/EventSuspensionDialog";
 import { formatTicketSalesEnd, getEventTicketSaleState, getTicketSaleState } from "../lib/ticketSales";
 import { formatDateTime } from "../lib/format";
+import { cities, venueCity } from "../lib/cities";
+import { prepareVenueRequest, validateEventVenue, venuesInCity } from "../lib/venues";
 
 const isOrganizer = (role: string) => role.trim().toUpperCase().replace(/^ROLE_/, "") === "ORGANIZER";
 const isPlatformAdmin = (role: string) => ["PLATFORM_ADMIN", "ADMIN"].includes(role.trim().toUpperCase().replace(/^ROLE_/, ""));
@@ -101,6 +105,8 @@ function OrganizerEventsList({ events, emptyMessage }: { events: Event[]; emptyM
               <Link to={`${base}/events/${event.id}/edit`} className="text-sm font-semibold underline">
                 {tx("Изменить")}</Link>
             )}
+            <Link to={`${base}/events/${event.id}/seating`} className="text-sm font-semibold underline">{tx("Настройка мест")}</Link>
+            {event.phase === "COMPLETED" && <Link to={`${base}/events/${event.id}/payout`} className="text-sm font-semibold underline">{tx("Выплата за событие")}</Link>}
             <Link to={`${base}/events/${event.id}/campaigns`} className="text-sm font-semibold underline">{tx("Кампании")}</Link>
             <Link to={`${base}/events/${event.id}/activation`} className="text-sm font-semibold underline">{tx("Платные продажи")}</Link>
             </>}
@@ -128,7 +134,7 @@ function useOrganizerEvents(page = 0, phase?: EventPhase) {
       ? ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page, phase]
       : ["organizer-events", platformAdmin ? "all" : profile.data?.userId, page],
     queryFn: () => platformAdmin
-      ? getEvents(page, EVENTS_PAGE_SIZE)
+      ? getAdminEvents({ page, size: EVENTS_PAGE_SIZE })
       : phase
         ? getMyEventsByPhase(phase, page, EVENTS_PAGE_SIZE)
         : getOrganizerEvents(profile.data!.userId, page, EVENTS_PAGE_SIZE),
@@ -199,6 +205,15 @@ export function OrganizerGuard() {
       />
     );
   }
+  if (user && user.role.trim().toUpperCase().replace(/^ROLE_/, "") === "ATTENDEE") {
+    return (
+      <section className="mx-auto max-w-xl rounded-2xl border p-8">
+        <h1 className="text-xl font-bold">{tx("Станьте организатором")}</h1>
+        <p className="mt-2 text-sm text-muted">{tx("Кабинет организатора доступен организаторам. Укажите контакты, и ваш аккаунт станет аккаунтом организатора.")}</p>
+        <BecomeOrganizerForm className="mt-5" />
+      </section>
+    );
+  }
   if (!user || !isOrganizer(user.role)) {
     return (
       <AccessMessage
@@ -227,6 +242,8 @@ export function OrganizerDashboardLayout() {
   const base = useDashboardBase();
   const platformAdmin = base === "/admin/dashboard";
   const tabs = [
+    ...(platformAdmin ? [{ to: `${base}/overview`, label: tx("Обзор платформы") }, ...[["orders", "Заказы"], ["payments", "Платежи"], ["refunds", "Возвраты"], ["campaigns", "Промокампании"], ["reports", "Жалобы на события"], ["settings", "Настройки платформы"], ["venues", "Схемы площадок"]].map(([path,label]) => ({ to: `${base}/${path}`, label: tx(label) }))] : []),
+    { to: `${base}/payouts`, label: tx("Выплаты") },
     { to: `${base}/events`, label: platformAdmin ? tx("Все мероприятия") : tx("Мои мероприятия") },
     ...(!platformAdmin ? [{ to: `${base}/create`, label: tx("Создать мероприятие") }] : []),
     { to: `${base}/manage`, label: tx("Управление") },
@@ -312,7 +329,7 @@ export function CreateOrganizerEventPage() {
 
   return (
     <div className="max-w-3xl">
-      <h2 className="text-lg font-bold">Create Event</h2>
+      <h2 className="text-lg font-bold">{tx("Создать мероприятие")}</h2>
       <p className="mb-5 text-sm text-muted">{tx("После создания событие появится в списке как черновик.")}</p>
       <OrganizerEventForm
         venues={venues.data?.content ?? []}
@@ -566,11 +583,12 @@ export function OrganizerTicketsPage() {
   const tickets = ticketTypes.data ?? [];
   const saleState = getEventTicketSaleState(tickets);
   const allocated = tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
-  const remaining = event.data.capacity == null ? null : Math.max(event.data.capacity - allocated, 0);
+  const remaining = event.data.seatingMode === "ASSIGNED" || event.data.capacity == null ? null : Math.max(event.data.capacity - allocated, 0);
 
   return (
     <div className="max-w-3xl space-y-6">
       <PosterManager event={event.data} />
+      <Link to={`${base}/events/${eventId}/seating`} className={buttonClass("secondary")}>{tx("Настройка мест")}</Link>
       {saleState === "sold-out" && (
         <p role="status" className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800">
           {tx("Все доступные билеты на мероприятие распроданы.")}</p>
@@ -597,6 +615,7 @@ export function OrganizerTicketsPage() {
             <TicketTypeCard
               key={ticket.id}
               ticket={ticket}
+              assigned={event.data?.seatingMode === "ASSIGNED"}
               maxQuantity={remaining === null ? null : remaining + ticket.quantity}
               isPending={updateMutation.isPending || visibilityMutation.isPending}
               updateError={updateMutation.variables?.ticketTypeId === ticket.id ? updateMutation.error : null}
@@ -635,6 +654,7 @@ export function OrganizerTicketsPage() {
 }
 
 function TicketTypeCard({
+  assigned = false,
   ticket,
   maxQuantity,
   isPending,
@@ -644,6 +664,7 @@ function TicketTypeCard({
   onToggleHidden,
 }: {
   ticket: TicketType;
+  assigned?: boolean;
   maxQuantity: number | null;
   isPending: boolean;
   updateError: unknown;
@@ -688,6 +709,7 @@ function TicketTypeCard({
       {editing && (
         <TicketTypeEditForm
           ticket={ticket}
+          assigned={assigned}
           maxQuantity={maxQuantity}
           isPending={isPending}
           error={updateError}
@@ -705,6 +727,7 @@ function TicketTypeCard({
 }
 
 function TicketTypeEditForm({
+  assigned = false,
   ticket,
   maxQuantity,
   isPending,
@@ -712,6 +735,7 @@ function TicketTypeEditForm({
   onSubmit,
 }: {
   ticket: TicketType;
+  assigned?: boolean;
   maxQuantity: number | null;
   isPending: boolean;
   error: unknown;
@@ -727,7 +751,7 @@ function TicketTypeEditForm({
     const description = String(form.get("description") ?? "").trim();
     const priceValue = String(form.get("price") ?? "");
     const price = Number(priceValue);
-    const quantity = Number(form.get("quantity"));
+    const quantity = assigned ? ticket.quantity : Number(form.get("quantity"));
     const salesStart = String(form.get("salesStart") ?? "");
     const salesEnd = String(form.get("salesEnd") ?? "");
     const maxPerOrder = Number(form.get("maxPerOrder"));
@@ -735,16 +759,16 @@ function TicketTypeEditForm({
     if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(priceValue)) {
       return setValidationError(tx("Цена должна быть неотрицательной и содержать не более двух знаков после запятой."));
     }
-    if (!Number.isSafeInteger(quantity) || quantity < ticket.sold || (maxQuantity !== null && quantity > maxQuantity)) {
+    if (!assigned && (!Number.isSafeInteger(quantity) || quantity < ticket.sold || (maxQuantity !== null && quantity > maxQuantity))) {
       return setValidationError(tx("Количество должно быть не меньше уже проданных билетов ({0}) и не больше {1}.", [ticket.sold, maxQuantity ?? tx("допустимого лимита")]));
     }
-    if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || maxPerOrder > quantity) {
+    if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || (!assigned && maxPerOrder > quantity)) {
       return setValidationError(tx("Лимит на заказ должен быть положительным числом и не превышать количество билетов."));
     }
     if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
       return setValidationError(tx("Начало продаж должно быть раньше окончания."));
     }
-    const request: UpdateTicketTypeRequest = { name, description, price, quantity, maxPerOrder };
+    const request: UpdateTicketTypeRequest = { name, description, price, ...(!assigned ? { quantity } : {}), maxPerOrder };
     if (salesStart) request.salesStart = toApiLocalDateTime(salesStart);
     if (salesEnd) request.salesEnd = toApiLocalDateTime(salesEnd);
     onSubmit(request);
@@ -754,10 +778,10 @@ function TicketTypeEditForm({
       <FormField label={tx("Название")}><input name="name" required maxLength={100} defaultValue={ticket.name} className={fieldClass} /></FormField>
       <FormField label={tx("Описание")}><textarea name="description" rows={2} defaultValue={ticket.description ?? ""} className={fieldClass} /></FormField>
       <FormField label={tx("Цена, ₸")}><input name="price" type="number" min="0" step="0.01" required defaultValue={ticket.price} className={fieldClass} /></FormField>
-      <FormField label={tx("Количество (не меньше проданного)")}><input name="quantity" type="number" min={ticket.sold} max={maxQuantity ?? undefined} step="1" required defaultValue={ticket.quantity} className={fieldClass} /></FormField>
+      {!assigned && <FormField label={tx("Количество (не меньше проданного)")}><input name="quantity" type="number" min={ticket.sold} max={maxQuantity ?? undefined} step="1" required defaultValue={ticket.quantity} className={fieldClass} /></FormField>}
       <FormField label={tx("Начало продаж")}><input name="salesStart" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesStart)} className={fieldClass} /></FormField>
       <FormField label={tx("Окончание продаж")}><input name="salesEnd" type="datetime-local" defaultValue={toLocalInputValue(ticket.salesEnd)} className={fieldClass} /></FormField>
-      <FormField label={tx("Максимум в одном заказе")}><input name="maxPerOrder" type="number" min="1" max={ticket.quantity} step="1" required defaultValue={ticket.maxPerOrder ?? 10} className={fieldClass} /></FormField>
+      <FormField label={tx("Максимум в одном заказе")}><input name="maxPerOrder" type="number" min="1" max={assigned ? undefined : ticket.quantity} step="1" required defaultValue={ticket.maxPerOrder ?? 10} className={fieldClass} /></FormField>
       <p className="text-xs text-muted sm:col-span-2">{tx("Пустые даты отправляются как отсутствие изменения; очистка даты зависит от поддержки backend.")}</p>
       {(validationError || error != null) && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{tx(validationError) || (error instanceof Error ? tx(error.message) : tx("Не удалось обновить тип билета."))}</p>}
       <Button type="submit" disabled={isPending} className="sm:col-span-2">{isPending ? tx("Сохраняем…") : tx("Сохранить тип билета")}</Button>
@@ -779,6 +803,7 @@ function TicketTypeForm({
   onSubmit: (request: CreateTicketTypeRequest) => void;
 }) {
   const { tx } = useLanguage();
+  const assigned = event.seatingMode === "ASSIGNED";
   const [validationError, setValidationError] = useState("");
 
   const submit = (formEvent: FormEvent<HTMLFormElement>) => {
@@ -789,7 +814,7 @@ function TicketTypeForm({
       const name = String(form.get("name") ?? "").trim();
       const description = String(form.get("description") ?? "").trim();
       const price = Number(form.get("price"));
-      const quantity = Number(form.get("quantity"));
+      const quantity = assigned ? Infinity : Number(form.get("quantity"));
       const maxPerOrderValue = String(form.get("maxPerOrder") ?? "");
       const salesStart = String(form.get("salesStart") ?? "");
       const salesEnd = String(form.get("salesEnd") ?? "");
@@ -799,10 +824,10 @@ function TicketTypeForm({
       if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(String(form.get("price")))) {
         throw new Error(tx("Цена должна быть неотрицательной и содержать не более двух знаков после запятой."));
       }
-      if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      if (!assigned && (!Number.isSafeInteger(quantity) || quantity <= 0)) {
         throw new Error(tx("Количество билетов должно быть целым числом больше нуля."));
       }
-      if (maxQuantity !== null && quantity > maxQuantity) {
+      if (!assigned && maxQuantity !== null && quantity > maxQuantity) {
         throw new Error(tx("Можно добавить не более {0} билетов с учётом уже распределённых мест.", [maxQuantity]));
       }
       if (maxPerOrderValue) {
@@ -821,7 +846,7 @@ function TicketTypeForm({
         throw new Error(tx("Начало продаж должно быть раньше окончания."));
       }
 
-      const request: CreateTicketTypeRequest = { name, price, quantity };
+      const request: CreateTicketTypeRequest = { name, price, ...(!assigned ? { quantity } : {}) };
       if (description) request.description = description;
       if (salesStart) request.salesStart = toApiLocalDateTime(salesStart);
       if (salesEnd) request.salesEnd = toApiLocalDateTime(salesEnd);
@@ -845,9 +870,9 @@ function TicketTypeForm({
         <FormField label={tx("Цена, ₸ (0 — бесплатно)")}>
           <input name="price" type="number" min="0" step="0.01" required className={fieldClass} />
         </FormField>
-        <FormField label={tx("Количество билетов / мест")}>
+        {!assigned && <FormField label={tx("Количество билетов / мест")}>
           <input name="quantity" type="number" min="1" max={maxQuantity ?? undefined} step="1" required className={fieldClass} />
-        </FormField>
+        </FormField>}
         <FormField label={tx("Начало продаж")}>
           <input name="salesStart" type="datetime-local" className={fieldClass} />
         </FormField>
@@ -871,7 +896,7 @@ function TicketTypeForm({
   );
 }
 
-function OrganizerEventForm({
+export function OrganizerEventForm({
   event,
   venues,
   isPending,
@@ -888,13 +913,17 @@ function OrganizerEventForm({
   onCancel?: () => void;
   onSubmit: (request: CreateEventRequest) => void;
 }) {
-  const { tx } = useLanguage();
+  const { tx, language } = useLanguage();
   const [validationError, setValidationError] = useState("");
+  const [selectedCityId, setSelectedCityId] = useState(() => event?.venue ? venueCity(event.venue) ?? "unknown" : "");
   const [selectedVenueId, setSelectedVenueId] = useState(event?.venue?.id ? String(event.venue.id) : "");
   const [capacityValue, setCapacityValue] = useState(event?.capacity == null ? "" : String(event.capacity));
   const [newlyCreatedVenue, setNewlyCreatedVenue] = useState<Venue | null>(null);
   const [showVenueForm, setShowVenueForm] = useState(false);
+  const layouts = useQuery({ queryKey: ["seating-layouts"], queryFn: getSeatingLayouts });
+  const [venueLayout, setVenueLayout] = useState("");
   const [venueName, setVenueName] = useState("");
+  const [venueCityId, setVenueCityId] = useState("");
   const [venueAddress, setVenueAddress] = useState("");
   const [venueCapacity, setVenueCapacity] = useState("");
   const [venueFormError, setVenueFormError] = useState("");
@@ -902,11 +931,14 @@ function OrganizerEventForm({
   const venueMutation = useMutation({
     mutationFn: createVenue,
     onSuccess: async (createdVenue) => {
+      setSelectedCityId(venueCity(createdVenue) ?? "");
       setSelectedVenueId(String(createdVenue.id));
       setNewlyCreatedVenue(createdVenue);
       setVenueName("");
+      setVenueCityId("");
       setVenueAddress("");
       setVenueCapacity("");
+      setVenueLayout("");
       setShowVenueForm(false);
       await queryClient.invalidateQueries({ queryKey: ["venues"] });
     },
@@ -916,6 +948,7 @@ function OrganizerEventForm({
     formEvent.preventDefault();
     setValidationError("");
     try {
+      validateEventVenue(selectedCityId, selectedVenue, event?.venue?.id);
       onSubmit(readEventForm(
         new FormData(formEvent.currentTarget),
         event?.startTime,
@@ -926,22 +959,23 @@ function OrganizerEventForm({
       setValidationError(caught instanceof Error ? tx(caught.message) : tx("Проверьте введённые данные."));
     }
   };
-  const knownVenue = venues.some((venue) => venue.id === event?.venue?.id);
+  const allVenues = [...new Map([
+    ...venues,
+    ...(event?.venue ? [event.venue] : []),
+    ...(newlyCreatedVenue ? [newlyCreatedVenue] : []),
+  ].map(venue => [venue.id, venue])).values()];
+  const cityVenues = venuesInCity(allVenues, selectedCityId).filter(venue => selectedCityId !== "unknown" || venue.id === event?.venue?.id);
   const selectedVenueIdNumber = Number(selectedVenueId);
-  const selectedVenue = venues.find((venue) => venue.id === selectedVenueIdNumber)
-    ?? (event?.venue?.id === selectedVenueIdNumber ? event.venue : undefined)
-    ?? (newlyCreatedVenue?.id === selectedVenueIdNumber ? newlyCreatedVenue : undefined);
+  const selectedVenue = cityVenues.find(venue => venue.id === selectedVenueIdNumber);
   const addVenue = () => {
-    const name = venueName.trim();
-    const address = venueAddress.trim();
-    const capacity = Number(venueCapacity);
-    if (!name || !address || !Number.isSafeInteger(capacity) || capacity <= 0) {
+    try {
+      const request = prepareVenueRequest({ name: venueName, cityId: venueCityId, address: venueAddress, capacity: venueCapacity, seatingLayout: venueLayout });
+      setVenueFormError("");
+      venueMutation.mutate(request);
+    } catch (error) {
       venueMutation.reset();
-      setVenueFormError(tx("Укажите название, адрес и вместимость площадки (целое число больше нуля)."));
-      return;
+      setVenueFormError(error instanceof Error ? error.message : "Проверьте введённые данные.");
     }
-    setVenueFormError("");
-    venueMutation.mutate({ name, address, capacity });
   };
 
   return (
@@ -949,11 +983,13 @@ function OrganizerEventForm({
       onSubmit={submit}
       onReset={() => {
         setValidationError("");
+        setSelectedCityId("");
         setSelectedVenueId("");
         setCapacityValue("");
         setNewlyCreatedVenue(null);
         setShowVenueForm(false);
         setVenueName("");
+        setVenueCityId("");
         setVenueAddress("");
         setVenueCapacity("");
         setVenueFormError("");
@@ -980,32 +1016,45 @@ function OrganizerEventForm({
           placeholder={tx("Например: полный возврат до 48 часов до начала события")}
         />
       </FormField>
+      <FormField label={tx("Город события")}>
+        <select
+          name="eventCity"
+          required
+          value={selectedCityId}
+          disabled={event?.seatingMode === "ASSIGNED" || isPending || venueMutation.isPending}
+          onChange={change => {
+            setSelectedCityId(change.target.value);
+            setSelectedVenueId("");
+            if (showVenueForm) setVenueCityId(cities.some(city => city.id === change.target.value) ? change.target.value : "");
+            setValidationError("");
+          }}
+          className={fieldClass}
+        >
+          <option value="" disabled>{tx("Выберите город")}</option>
+          {cities.map(city => <option key={city.id} value={city.id}>{city[language]}</option>)}
+          {event?.venue && venueCity(event.venue) === null && <option value="unknown">{tx("Город не указан")}</option>}
+        </select>
+      </FormField>
+      {event?.seatingMode === "ASSIGNED" && <input type="hidden" name="venueId" value={selectedVenueId} />}
       <FormField label={tx("Площадка")}>
         <select
           name="venueId"
           required
           value={selectedVenueId}
+          disabled={event?.seatingMode === "ASSIGNED" || !selectedCityId || isPending || venueMutation.isPending}
           onChange={(change) => setSelectedVenueId(change.target.value)}
           className={fieldClass}
         >
-          <option value="" disabled>{tx("Выберите площадку")}</option>
-          {event?.venue && !knownVenue && (
-            <option value={event.venue.id}>
-              {event.venue.name} — {event.venue.address}
-              {event.venue.capacity != null ? tx(" · до {0} человек", [event.venue.capacity]) : tx(" · без лимита")}
-            </option>
-          )}
-          {venues.map((venue) => (
+          <option value="" disabled>{selectedCityId ? tx("Выберите площадку") : tx("Сначала выберите город")}</option>
+          {cityVenues.map((venue) => (
             <option key={venue.id} value={venue.id}>
               {venue.name} — {venue.address}
               {venue.capacity != null ? tx(" · до {0} человек", [venue.capacity]) : tx(" · без лимита")}
             </option>
           ))}
-          {newlyCreatedVenue && !venues.some((venue) => venue.id === newlyCreatedVenue.id) && (
-            <option value={newlyCreatedVenue.id}>
-              {newlyCreatedVenue.name} — {newlyCreatedVenue.address} {tx(" · до ")}{newlyCreatedVenue.capacity} {tx(" человек")}</option>
-          )}
         </select>
+        {selectedCityId && cityVenues.length === 0 && <p className="text-sm text-muted">{tx("В этом городе пока нет площадок. Добавьте новую площадку ниже.")}</p>}
+        {selectedCityId === "unknown" && <p className="text-sm text-muted">{tx("У текущей площадки не указан город. Чтобы изменить место проведения, выберите город и другую площадку.")}</p>}
       </FormField>
       <div className="rounded-lg bg-surface p-4">
         <Button
@@ -1014,7 +1063,9 @@ function OrganizerEventForm({
           title={tx("Добавить площадку")}
           aria-label={tx("Добавить площадку")}
           aria-expanded={showVenueForm}
+          disabled={event?.seatingMode === "ASSIGNED" || isPending || venueMutation.isPending}
           onClick={() => {
+            if (!showVenueForm) setVenueCityId(cities.some(city => city.id === selectedCityId) ? selectedCityId : "");
             setShowVenueForm((shown) => !shown);
             setVenueFormError("");
             venueMutation.reset();
@@ -1023,7 +1074,14 @@ function OrganizerEventForm({
           {showVenueForm ? tx("Закрыть") : tx("Добавить")}
         </Button>
         {showVenueForm && (
-          <div className="mt-4 space-y-3">
+          <fieldset disabled={venueMutation.isPending} className="mt-4 space-y-3">
+            <legend className="font-semibold">{tx("Новая площадка")}</legend>
+            <FormField label={tx("Город площадки")}>
+              <select value={venueCityId} onChange={change => setVenueCityId(change.target.value)} className={fieldClass} autoComplete="address-level2">
+                <option value="" disabled>{tx("Выберите город площадки")}</option>
+                {cities.map(city => <option key={city.id} value={city.id}>{city[language]}</option>)}
+              </select>
+            </FormField>
             <FormField label={tx("Название площадки")}>
               <input
                 value={venueName}
@@ -1033,7 +1091,7 @@ function OrganizerEventForm({
                 autoComplete="organization"
               />
             </FormField>
-            <FormField label={tx("Адрес")}>
+            <FormField label={tx("Адрес площадки: улица и дом")}>
               <input
                 value={venueAddress}
                 onChange={(change) => setVenueAddress(change.target.value)}
@@ -1042,12 +1100,14 @@ function OrganizerEventForm({
                 autoComplete="street-address"
               />
             </FormField>
+            <FormField label={tx("Схема зала")}><select value={venueLayout} onChange={e => setVenueLayout(e.target.value)} className={fieldClass}><option value="">{tx("Без схемы")}</option>{layouts.data?.map(layout => <option key={layout.key} value={layout.key}>{layout.name} · {layout.capacity}</option>)}</select>{layouts.error && <p role="alert">{tx("Не удалось загрузить схемы площадок")}</p>}</FormField>
             <FormField label={tx("Максимальная вместимость, человек")}>
               <input
                 type="number"
                 min="1"
                 step="1"
-                value={venueCapacity}
+                disabled={!!venueLayout}
+                value={venueLayout ? layouts.data?.find(l => l.key === venueLayout)?.capacity ?? "" : venueCapacity}
                 onChange={(change) => setVenueCapacity(change.target.value)}
                 className={fieldClass}
               />
@@ -1061,7 +1121,7 @@ function OrganizerEventForm({
             <Button type="button" disabled={venueMutation.isPending} onClick={addVenue}>
               {venueMutation.isPending ? tx("Добавляем…") : tx("Добавить площадку")}
             </Button>
-          </div>
+          </fieldset>
         )}
         {venues.length === 0 && (
           <p className="mt-3 text-sm text-muted">{tx("Создайте площадку, чтобы продолжить создание события.")}</p>
@@ -1082,6 +1142,7 @@ function OrganizerEventForm({
         </FormField>
         <FormField label={tx("Вместимость")}>
           <input
+            disabled={event?.seatingMode === "ASSIGNED"}
             name="capacity"
             type="number"
             min="1"
@@ -1120,11 +1181,11 @@ function OrganizerEventForm({
         </p>
       )}
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={isPending || venues.length === 0}>
+        <Button type="submit" disabled={isPending || venueMutation.isPending || !selectedVenue || !selectedCityId}>
           {submitLabel}
         </Button>
         {!event && (
-          <Button type="reset" variant="secondary" disabled={isPending}>
+          <Button type="reset" variant="secondary" disabled={isPending || venueMutation.isPending}>
             {tx("Очистить")}</Button>
         )}
         {onCancel && <Button type="button" variant="secondary" onClick={onCancel}>{tx("Отмена")}</Button>}

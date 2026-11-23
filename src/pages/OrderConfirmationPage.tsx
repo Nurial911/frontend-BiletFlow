@@ -96,9 +96,9 @@ export default function OrderConfirmationPage({ paymentResult = false }: { payme
 
       <section className="mt-6 rounded-xl border p-5" aria-label={tx("Состав заказа")}>
         <div className="space-y-3">
-          {currentOrder.items.map((item) => (
-            <div key={item.ticketTypeId} className="flex justify-between gap-4 text-sm">
-              <span>{item.ticketTypeName} × {item.quantity}</span>
+          {currentOrder.items.map((item, index) => (
+            <div key={item.seatId ?? `${item.ticketTypeId}-${index}`} className="flex justify-between gap-4 text-sm">
+              <span>{item.seatLabel ? `${item.ticketTypeName} · ${item.seatLabel}${item.quantity > 1 ? ` × ${item.quantity}` : ""}` : `${item.ticketTypeName} × ${item.quantity}`}</span>
               <span className="whitespace-nowrap font-medium">{formatPrice(item.unitPrice * item.quantity, locale)}</span>
             </div>
           ))}

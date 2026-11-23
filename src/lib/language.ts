@@ -5,7 +5,7 @@ export const isLanguage = (value: unknown): value is Language => value === "ru" 
 const ru = {
   city: "Город", allCities: "Все города", unknownCity: "Город не указан", language: "Язык интерфейса",
   search: "Поиск событий", searchPlaceholder: "Поиск событий…", notifications: "Уведомления", support: "Поддержка",
-  organizer: "Кабинет организатора", checkIn: "Check-in", platform: "Панель платформы", users: "Пользователи",
+  organizer: "Кабинет организатора", becomeOrganizer: "Стать организатором", checkIn: "Check-in", platform: "Панель платформы", users: "Пользователи",
   myTickets: "Мои билеты", profile: "Профиль", login: "Войти", logout: "Выйти", categories: "Категории", all: "Все",
   popular: "Популярные события", searchResults: "Результаты поиска «{query}»", noResults: "Ничего не найдено. Попробуйте другой город, дату или запрос.",
   noEvents: "Пока нет опубликованных событий.", resetFilters: "Сбросить фильтры", dateSelection: "Выбор даты", today: "Сегодня", chooseDate: "Выбрать дату",
@@ -26,7 +26,7 @@ export const translations: Record<Language, Dictionary> = {
   kk: {
     city: "Қала", allCities: "Барлық қалалар", unknownCity: "Қала көрсетілмеген", language: "Интерфейс тілі",
     search: "Іс-шараларды іздеу", searchPlaceholder: "Іс-шараларды іздеу…", notifications: "Хабарландырулар", support: "Қолдау",
-    organizer: "Ұйымдастырушы кабинеті", checkIn: "Кіруді тексеру", platform: "Платформа панелі", users: "Пайдаланушылар",
+    organizer: "Ұйымдастырушы кабинеті", becomeOrganizer: "Ұйымдастырушы болу", checkIn: "Кіруді тексеру", platform: "Платформа панелі", users: "Пайдаланушылар",
     myTickets: "Менің билеттерім", profile: "Профиль", login: "Кіру", logout: "Шығу", categories: "Санаттар", all: "Барлығы",
     popular: "Танымал іс-шаралар", searchResults: "«{query}» іздеу нәтижелері", noResults: "Ештеңе табылмады. Басқа қаланы, күнді немесе сұрауды таңдаңыз.",
     noEvents: "Әзірге жарияланған іс-шаралар жоқ.", resetFilters: "Сүзгілерді тазарту", dateSelection: "Күнді таңдау", today: "Бүгін", chooseDate: "Күнді таңдау",
@@ -43,7 +43,7 @@ export const translations: Record<Language, Dictionary> = {
   en: {
     city: "City", allCities: "All cities", unknownCity: "City not specified", language: "Interface language",
     search: "Search events", searchPlaceholder: "Search events…", notifications: "Notifications", support: "Support",
-    organizer: "Organizer dashboard", checkIn: "Check-in", platform: "Platform dashboard", users: "Users",
+    organizer: "Organizer dashboard", becomeOrganizer: "Become an organizer", checkIn: "Check-in", platform: "Platform dashboard", users: "Users",
     myTickets: "My tickets", profile: "Profile", login: "Sign in", logout: "Sign out", categories: "Categories", all: "All",
     popular: "Popular events", searchResults: "Search results for “{query}”", noResults: "No events found. Try another city, date or search.",
     noEvents: "No published events yet.", resetFilters: "Clear filters", dateSelection: "Choose a date", today: "Today", chooseDate: "Choose a date",

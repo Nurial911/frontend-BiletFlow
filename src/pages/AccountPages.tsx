@@ -1,3 +1,6 @@
+import { getAdminEvents } from "../api/platform";
+import { CalendarMenu } from "../components/events/EventExtras";
+import { UserSuspensionControls } from "../components/auth/UserSuspensionControls";
 import { useLanguage } from "../i18n/LanguageContext";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -12,7 +15,8 @@ import {
 import { cancelOrder, getMyOrders, getMyTickets, getOrderRefunds, getTicketQr, getTicketPdf } from "../api/orders";
 import { downloadBlob } from "../lib/download";
 import { OrganizerProfileSettings } from "./CommercePages";
-import { getEvents, getOrganizerProfile, setEventSuspended } from "../api/events";
+import { BecomeOrganizerForm } from "../components/auth/BecomeOrganizerForm";
+import { getOrganizerProfile, setEventSuspended } from "../api/events";
 import {
   changeUserRole,
   deleteMyAccount,
@@ -238,6 +242,13 @@ export function AccountSettingsPage() {
       </section>
 
       {role === "ORGANIZER" && <OrganizerProfileSettings />}
+      {role === "ATTENDEE" && (
+        <section className="rounded-xl border p-5">
+          <h2 className="text-lg font-semibold">{tx("Стать организатором")}</h2>
+          <p className="mt-1 text-sm text-muted">{tx("Проводите свои мероприятия на BiletFlow: укажите контакты, по которым посетители смогут с вами связаться.")}</p>
+          <BecomeOrganizerForm className="mt-4" />
+        </section>
+      )}
       <section className="rounded-xl border p-5">
         <h2 className="text-lg font-semibold">{tx("Разделы для вашего аккаунта")}</h2>
         <div className="mt-4 flex flex-wrap gap-3">
@@ -383,7 +394,7 @@ function OrderCard({ order, pending, error, onCancel }: { order: Order; pending:
         <strong>{formatPrice(order.totalAmount, locale)}</strong>
       </div>
       <ul className="mt-3 space-y-1 text-sm text-muted">
-        {order.items.map((item) => <li key={item.ticketTypeId}>{item.ticketTypeName} × {item.quantity}</li>)}
+        {order.items.map((item, index) => <li key={item.seatId ?? `${item.ticketTypeId}-${index}`}>{item.seatLabel ? `${item.ticketTypeName} · ${item.seatLabel}${item.quantity > 1 ? ` × ${item.quantity}` : ""}` : `${item.ticketTypeName} × ${item.quantity}`}</li>)}
       </ul>
       <p className="mt-3 text-sm">{tx("Статус: ")}{statusLabel(order.status)}</p>
             {order.status === "REFUNDED" && <OrderRefundInfo orderId={order.id} />}
@@ -443,7 +454,9 @@ function MyTicketCard({ ticket }: { ticket: Ticket }) {
   return (
     <article className="rounded-xl border p-4">
       <p className="text-xs text-muted">{ticket.eventTitle}</p>
+      <CalendarMenu eventId={ticket.eventId} cancelled={ticket.status === "CANCELLED" || ticket.status === "REFUNDED"} />
       <h3 className="mt-1 font-semibold">{ticket.ticketTypeName}</h3>
+      {ticket.seatLabel && <p className="mt-1 text-sm font-medium">{ticket.seatLabel}</p>}
       <p className="mt-2 text-sm">{tx("Статус: ")}{statusLabel(ticket.status)}</p>
       <p className="mt-1 text-sm">{ticket.attendeeName ?? ticket.attendeeEmail}</p>
       <p className="mt-1 text-xs text-muted">{tx("Билет №")}{ticket.id} {tx(" · Заказ №")}{ticket.orderId}</p>
@@ -552,6 +565,7 @@ export function EventCheckInPage() {
               <input autoComplete="off" value={code} onChange={(event) => setCode(event.target.value)} placeholder={tx("Код билета")} className="min-w-60 flex-1 rounded-lg border px-3 py-2 text-sm" />
               <Button type="submit" disabled={!code.trim() || scan.isPending}>{scan.isPending ? tx("Проверяем…") : tx("Проверить")}</Button>
             </div>
+            {scan.data?.ticket?.seatLabel && <p className="mt-2 font-semibold">{scan.data.ticket.seatLabel}</p>}
             {scanMessage && <p role="status" className="mt-3 rounded-md bg-surface p-3 text-sm">{tx(scanMessage)}</p>}
             {undo.error && <ApiErrorMessage error={undo.error} />}
           </form>
@@ -587,7 +601,7 @@ function AttendeeRow({ ticket, pending, onUndo }: { ticket: Ticket; pending: boo
       <div>
         <p className="font-medium">{ticket.attendeeName ?? ticket.attendeeEmail}</p>
         <p className="text-xs text-muted">{ticket.attendeeEmail}</p>
-        <p className="text-sm text-muted">{ticket.ticketTypeName} {tx(" · Билет №")}{ticket.id} · {statusLabel(ticket.status)}</p>
+        <p className="text-sm text-muted">{ticket.ticketTypeName}{ticket.seatLabel ? ` · ${ticket.seatLabel}` : ""} {tx(" · Билет №")}{ticket.id} · {statusLabel(ticket.status)}</p>
         {ticket.usedAt && <p className="text-xs text-muted">{tx("Отмечен: ")}{formatDateTime(ticket.usedAt, locale)}</p>}
       </div>
       {ticket.status === "USED" && <Button variant="secondary" disabled={pending} onClick={onUndo}>{tx("Отменить check-in")}</Button>}
@@ -600,8 +614,9 @@ export function PlatformAdminPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [suspensionTarget, setSuspensionTarget] = useState<{ id: number; title: string } | null>(null);
-  const users = useQuery({ queryKey: ["admin-users", page], queryFn: () => getUsers(page, PAGE_SIZE) });
-  const events = useQuery({ queryKey: ["admin-events"], queryFn: () => getEvents(0, 100) });
+  const [userFilters, setUserFilters] = useState<{ q?: string; role?: string; suspended?: string }>({});
+  const users = useQuery({ queryKey: ["admin-users", page, userFilters], queryFn: () => getUsers(page, PAGE_SIZE, userFilters) });
+  const events = useQuery({ queryKey: ["admin-events"], queryFn: () => getAdminEvents({ page: 0, size: 100 }) });
   const remove = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin-users"] }); },
@@ -643,6 +658,12 @@ export function PlatformAdminPage() {
         <Link to="/admin/dashboard" className="rounded-lg bg-surface px-4 py-2 text-sm font-semibold hover:bg-gray-200">
           {tx("Панель всех мероприятий")}</Link>
       </div>
+      <form className="my-4 flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); setUserFilters({ q: String(data.get("q") ?? ""), role: String(data.get("role") ?? ""), suspended: String(data.get("suspended") ?? "") }); setPage(0); }}>
+        <input name="q" defaultValue={userFilters.q ?? ""} aria-label={tx("Поиск")} placeholder={tx("Поиск по имени или ID")} className="rounded border p-2" />
+        <select name="role" defaultValue={userFilters.role ?? ""} aria-label={tx("Роль")} className="rounded border p-2"><option value="">{tx("Все роли")}</option>{["ATTENDEE", "ORGANIZER", "EVENT_ADMIN", "PLATFORM_ADMIN"].map(role => <option key={role} value={role}>{statusLabel(role)}</option>)}</select>
+        <select name="suspended" defaultValue={userFilters.suspended ?? ""} aria-label={tx("Статус")} className="rounded border p-2"><option value="">{tx("Все")}</option><option value="true">{tx("Приостановлено")}</option><option value="false">{tx("Активен")}</option></select>
+        <Button type="submit">{tx("Найти")}</Button>
+      </form>
       {(users.data?.content ?? []).length === 0 ? <Empty text={tx("Пользователи не найдены.")} /> : (
         <div className="mt-4 space-y-3">
           {(users.data?.content ?? []).map((user) => (
@@ -753,10 +774,11 @@ function AdminUserCard({ user, pending, onDelete }: { user: User; pending: boole
           <Button variant="secondary" disabled={pending} onClick={onDelete}>{tx("Удалить")}</Button>
         </div>
       </div>
+      <UserSuspensionControls user={user} />
       {editing && (
         <form onSubmit={submit} className="mt-4 space-y-3 border-t pt-4">
           <label className="block text-sm">{tx("Роль")}<select value={role} onChange={(event) => setRole(event.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2">
-              <option value="USER">{tx("Посетитель (USER)")}</option>
+              <option value="ATTENDEE">{tx("Посетитель (ATTENDEE)")}</option>
               <option value="ORGANIZER">{tx("Организатор (ORGANIZER)")}</option>
               <option value="EVENT_ADMIN">{tx("Администратор события (EVENT_ADMIN)")}</option>
               <option value="PLATFORM_ADMIN">{tx("Администратор платформы (PLATFORM_ADMIN)")}</option>

@@ -41,6 +41,7 @@ export function translateText(language: Language, source: string | number | null
 }
 
 const STATUS_TEXT: Record<string, string> = {
+  SCHEDULED: "Запланировано", ON_HOLD: "На удержании", DISMISSED: "Отклонена", ACTIONED: "Меры приняты", FRAUD: "Мошенничество", MISLEADING: "Недостоверная информация", INAPPROPRIATE: "Неприемлемый контент", SPAM: "Спам", OTHER: "Другое",
   DRAFT: "Черновик", PUBLISHED: "Опубликовано", CANCELLED: "Отменено", PENDING: "Ожидает подтверждения", PAID: "Оплачен", EXPIRED: "Истёк", REFUNDED: "Возвращён",
   VALID: "Действителен", USED: "Использован", SUCCEEDED: "Успешно", FAILED: "Отклонено", ACTIVE: "Активен", SUSPENDED: "Приостановлено",
   OPEN: "Открыто", IN_PROGRESS: "В работе", WAITING_FOR_CUSTOMER: "Ожидает ответа посетителя", RESOLVED: "Решено",

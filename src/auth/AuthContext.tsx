@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as authApi from "../api/auth";
-import { ApiError, clearToken, getToken, saveToken } from "../api/client";
+import { ApiError, clearToken, getToken, saveToken, onAuthFailure } from "../api/client";
 import type { User } from "../api/types";
 
 // Everything about "who is logged in" lives here.
@@ -12,10 +12,13 @@ interface AuthContextValue {
   isLoggedIn: boolean;
   isUserLoading: boolean;
   userError: unknown;
+  sessionError?: string;
   refetchUser: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  // Switch to a token the backend issued for this user, e.g. after a role change.
+  adoptToken: (accessToken: string) => void;
   isLoginOpen: boolean;
   openLogin: () => void;
   closeLogin: () => void;
@@ -27,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(getToken());
   const [isLoginOpen, setLoginOpen] = useState(false);
+  const [sessionError, setSessionError] = useState("");
 
   // Ask the backend who we are, but only if we have a token.
   const me = useQuery({
@@ -44,12 +48,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   }, [queryClient]);
 
+  useEffect(() => onAuthFailure(message => {
+    setSessionError(message);
+    logout();
+  }), [logout]);
+
   // An old or expired token: forget it.
   useEffect(() => {
     if (me.error instanceof ApiError && me.error.status === 401) logout();
   }, [me.error, logout]);
 
+  const adoptToken = useCallback((accessToken: string) => {
+    // Cached data was loaded with the old role; reload everything with the new token.
+    void queryClient.cancelQueries();
+    queryClient.clear();
+    saveToken(accessToken);
+    setToken(accessToken);
+  }, [queryClient]);
+
   const finishAuth = (res: { accessToken: string; user: User }) => {
+    setSessionError("");
     queryClient.clear();
     saveToken(res.accessToken);
     queryClient.setQueryData(["me", res.accessToken], res.user);
@@ -62,10 +80,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoggedIn: !!token,
     isUserLoading: !!token && me.isLoading,
     userError: me.error,
+    sessionError,
     refetchUser: () => { void me.refetch(); },
     login: async (email, password) => finishAuth(await authApi.login(email, password)),
     register: async (email, password) => finishAuth(await authApi.register(email, password)),
     logout,
+    adoptToken,
     isLoginOpen,
     openLogin: () => setLoginOpen(true),
     closeLogin: () => setLoginOpen(false),

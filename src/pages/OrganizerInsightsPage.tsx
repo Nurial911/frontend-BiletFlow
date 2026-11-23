@@ -1,3 +1,4 @@
+import { getAdminEvents } from "../api/platform";
 import { useLanguage } from "../i18n/LanguageContext";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -14,7 +15,6 @@ import { Button, buttonClass } from "../components/ui/Button";
 import { formatLongDate, formatPrice, formatShortDate, formatDateTime } from "../lib/format";
 import type { EventSales, EventStaff } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { getEvents } from "../api/events";
 
 function useDashboardBase() {
   const { user } = useAuth();
@@ -89,7 +89,10 @@ export function OrganizerSalesPage() {
           </div>
           <div className="grid gap-2 sm:grid-cols-4">
             <Metric label={tx("Скидки")} value={formatPrice(summary.totals.discounts, locale)} />
-            <Metric label={tx("После скидок")} value={formatPrice(summary.totals.netRevenue, locale)} />
+            <Metric label={tx("Возвраты")} value={formatPrice(summary.totals.refunds ?? 0, locale)} />
+            <Metric label={tx("Возвращено билетов")} value={String(summary.totals.ticketsRefunded ?? 0)} />
+            <Metric label={tx("Возвращено заказов")} value={String(summary.totals.refundedOrders ?? 0)} />
+            <Metric label={tx("После скидок и возвратов")} value={formatPrice(summary.totals.netRevenue, locale)} />
             <Metric label={tx("Комиссии")} value={formatPrice(summary.totals.processingFees, locale)} />
             <Metric label={tx("Ожидаемая выплата (симуляция)")} value={formatPrice(summary.totals.estimatedPayout, locale)} />
           </div>
@@ -195,7 +198,7 @@ function EventSalesCard({ row, expanded, onToggle, toggleLabel }: { row: EventSa
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="border-b text-xs text-muted">
-              <tr><th className="py-2 pr-3">{tx("Тип билета")}</th><th className="py-2 pr-3">{tx("Цена")}</th><th className="py-2 pr-3">{tx("Продано")}</th><th className="py-2 pr-3">{tx("Резерв")}</th><th className="py-2 pr-3">{tx("Остаток")}</th><th className="py-2">{tx("Выручка")}</th></tr>
+              <tr><th className="py-2 pr-3">{tx("Тип билета")}</th><th className="py-2 pr-3">{tx("Цена")}</th><th className="py-2 pr-3">{tx("Продано")}</th><th className="py-2 pr-3">{tx("Возвращено")}</th><th className="py-2 pr-3">{tx("Резерв")}</th><th className="py-2 pr-3">{tx("Остаток")}</th><th className="py-2">{tx("Выручка")}</th></tr>
             </thead>
             <tbody>
               {row.ticketTypes.map((ticket) => (
@@ -203,7 +206,7 @@ function EventSalesCard({ row, expanded, onToggle, toggleLabel }: { row: EventSa
                   <td className="py-2 pr-3">{ticket.name}</td>
                   <td className="py-2 pr-3">{ticket.price === 0 ? tx("Бесплатно") : formatPrice(ticket.price, locale)}</td>
                   <td className="py-2 pr-3">{ticket.sold}</td>
-                  <td className="py-2 pr-3">{ticket.reserved}</td>
+                  <td className="py-2 pr-3">{ticket.refunded ?? 0}</td><td className="py-2 pr-3">{ticket.reserved}</td>
                   <td className="py-2 pr-3">{ticket.available}</td>
                   <td className="py-2">{formatPrice(ticket.revenue, locale)}</td>
                 </tr>
@@ -271,7 +274,7 @@ export function AdminEventSalesPage() {
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
-  const events = useQuery({ queryKey: ["admin-sales-events", page], queryFn: () => getEvents(page, 20) });
+  const events = useQuery({ queryKey: ["admin-sales-events", page], queryFn: () => getAdminEvents({ page, size: 20 }) });
   const sales = useQuery({ queryKey: ["organizer-sales-detail", selected], queryFn: () => getEventSales(selected!), enabled: selected !== null });
   const orders = useQuery({ queryKey: ["organizer-event-orders", selected, orderPage, status, search], queryFn: () => getEventOrders(selected!, { page: orderPage, status: status || undefined, query: search }), enabled: selected !== null });
   return <section className="space-y-5">

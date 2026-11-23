@@ -1,0 +1,28 @@
+import { useState } from "react";
+import { useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getTicketTypes, getVenues } from "../api/events";
+import { assignSection, getSeating, getSeatingLayouts, getSectionSeats, setSeatingMode, setSeatsBlocked, setVenueLayout, type SeatingMode } from "../api/seating";
+import { RequestError } from "../components/events/EventExtras";
+import { Button } from "../components/ui/Button";
+import { useLanguage } from "../i18n/LanguageContext";
+export default function SeatingSetupPage() {
+  const { tx } = useLanguage();
+  const id = Number(useParams().eventId);
+  const cache = useQueryClient();
+  const [section, setSection] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
+  const setup = useQuery({ queryKey: ["seating-setup", id], queryFn: () => getSeating(id) });
+  const types = useQuery({ queryKey: ["ticket-types", id], queryFn: () => getTicketTypes(id) });
+  const seats = useQuery({ queryKey: ["setup-seats", id, section], queryFn: () => getSectionSeats(id, section!), enabled: section !== null, refetchInterval: 15000 });
+  const change = useMutation({ mutationFn: (operation: () => Promise<unknown>) => operation(), onSuccess: async () => { setSelected([]); await Promise.all([cache.invalidateQueries({ queryKey: ["seating-setup", id] }), cache.invalidateQueries({ queryKey: ["setup-seats", id] }), cache.invalidateQueries({ queryKey: ["ticket-types", id] }), cache.invalidateQueries({ queryKey: ["event", id] }), cache.invalidateQueries({ queryKey: ["seat-map", id] }), cache.invalidateQueries({ queryKey: ["seat-section", id] })]); } });
+  return <section className="space-y-4"><h2 className="text-xl font-bold">{tx("Настройка мест")}</h2><p>{tx("Режим можно менять только до первого заказа. Сначала выберите режим, затем создайте типы билетов и привяжите сектора.")}</p><RequestError error={setup.error || types.error || seats.error || change.error} />{setup.data && <><label>{tx("Режим рассадки")}<select className="ml-3 rounded border p-2" value={setup.data.seatingMode} disabled={change.isPending} onChange={e => { const mode = e.target.value as SeatingMode; setSection(null); setSelected([]); change.mutate(() => setSeatingMode(id, mode)); }}><option value="GENERAL_ADMISSION">{tx("Свободное размещение")}</option><option value="ASSIGNED">{tx("Нумерованные места")}</option></select></label>{setup.data.sections.map(s => <article key={s.id} className="rounded-xl border p-4"><h3 className="font-semibold">{s.name} · {s.capacity}</h3><p>{tx("Доступно")}: {s.available} · {tx("Заблокировано")}: {s.blocked}</p><label>{tx("Тип билета")}<select className="m-2 rounded border p-2" value={s.ticketTypeId ?? ""} disabled={change.isPending} onChange={e => { const value = e.target.value ? Number(e.target.value) : null; change.mutate(() => assignSection(id, s.id, value)); }}><option value="">{tx("Не продаётся")}</option>{types.data?.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>{s.kind === "SEATED" && <Button variant="secondary" onClick={() => { setSection(s.id); setSelected([]); }}>{tx("Управление местами")}</Button>}</article>)}</>}{section !== null && <section><h3>{tx("Выберите места для блокировки или разблокировки")}</h3>{seats.isLoading && <p>{tx("Загрузка…")}</p>}<div className="my-3 flex max-h-96 flex-wrap gap-2 overflow-auto">{seats.data?.seats.map(seat => <button key={seat.id} disabled={change.isPending || ["SOLD", "HELD", "YOURS"].includes(seat.status)} aria-pressed={selected.includes(seat.id)} onClick={() => setSelected(current => current.includes(seat.id) ? current.filter(s => s !== seat.id) : current.length < 1000 ? [...current, seat.id] : current)} className={`rounded border p-2 ${selected.includes(seat.id) ? "bg-black text-white" : seat.status === "UNAVAILABLE" ? "bg-gray-200" : ""}`}>{seat.row} / {seat.number} · {tx(seat.status === "AVAILABLE" ? "Доступно" : "Недоступно")}</button>)}</div><Button disabled={!selected.length || change.isPending} onClick={() => change.mutate(() => setSeatsBlocked(id, selected, true))}>{tx("Заблокировать")}</Button><Button disabled={!selected.length || change.isPending} onClick={() => change.mutate(() => setSeatsBlocked(id, selected, false))}>{tx("Разблокировать")}</Button></section>}</section>;
+}
+export function VenueLayoutsPage() {
+  const { tx } = useLanguage();
+  const [page, setPage] = useState(0);
+  const venues = useQuery({ queryKey: ["venue-layouts", page], queryFn: () => getVenues(page,20) });
+  const layouts = useQuery({ queryKey: ["seating-layouts"], queryFn: getSeatingLayouts });
+  const mutation = useMutation({ mutationFn: ({ id, layout }: { id: number; layout: string | null }) => setVenueLayout(id, layout), onSuccess: () => venues.refetch() });
+  return <section><h2 className="text-xl font-bold">{tx("Схемы площадок")}</h2><RequestError error={venues.error || layouts.error || mutation.error} />{venues.data?.content.map(venue => <article key={venue.id} className="my-3 rounded-xl border p-4"><h3>{venue.name}</h3><p>{venue.address}</p><label>{tx("Схема зала")}<select className="m-2 rounded border p-2" value={venue.seatingLayout ?? ""} disabled={mutation.isPending} onChange={e => mutation.mutate({ id: venue.id, layout: e.target.value || null })}><option value="">{tx("Без схемы")}</option>{layouts.data?.map(l => <option key={l.key} value={l.key}>{l.name} · {l.capacity}</option>)}</select></label></article>)}<Button disabled={page === 0} onClick={() => setPage(page - 1)}>{tx("Назад")}</Button><Button disabled={page + 1 >= (venues.data?.totalPages ?? 0)} onClick={() => setPage(page + 1)}>{tx("Далее")}</Button></section>;
+}

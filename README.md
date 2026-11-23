@@ -38,12 +38,22 @@ values are sent without a timezone suffix. A venue must already exist because
 use the shared API client, which adds the saved bearer token and reports backend
 errors.
 
-If the needed venue is missing, the event form can create it through
+The event form first asks for a city, then lists venues in that city. Changing
+the city clears the venue selection. Editing preselects the current venue's
+city; legacy events without a recognized city retain their current venue.
+
+If the needed venue is missing, the form asks separately for its city, name,
+street/building address and capacity, then creates it through
 `POST /api/venues` with `name`, `address`, and a positive integer `capacity`,
 refresh the venue list, and select the new venue automatically. The form shows
 the venue limit, prevents an event capacity above it, and explains that leaving
 event capacity empty uses the venue capacity. The backend enforces this limit
 on both event creation and updates.
+The deployed API still has no city field: the selected city is saved at the
+start of `address` (for example `Астана, ул. Абая, 10`). This persists through
+backend reads and feeds the same city filter used by the catalog. The explicit
+prefix takes priority over city names in a street name. Events continue to
+send only `venueId`, so the event city always comes from its selected venue.
 
 After saving an event, the organizer is taken to a ticket setup step. It uses
 `POST /api/events/{eventId}/ticket-types`; each ticket type has its own name,
@@ -130,9 +140,10 @@ up to two fractional digits, including server-calculated promo discounts.
   admin staff management is allowed; event/ticket editing remains owner-only.
 
 All authorization must still be enforced by the backend. Signing out clears
-private query caches before another account is used. Real refunds, audit-log
-reading, user suspension, seat selection, calendar export and real payouts
-remain unavailable because the backend does not provide those operations.
+private query caches before another account is used. An authenticated 401/403 clears
+the session and displays the server reason. Refunds, event history, account suspension,
+assigned seat selection and calendar export are integrated. Payouts remain simulated;
+the payout screens explicitly indicate that no money moves.
 
 Backend configuration must set `APP_FRONTEND_URL` to this frontend's reachable
 base URL for email, Campaign QR and Halyk return links. Halyk credentials,
@@ -141,6 +152,24 @@ in the frontend. Production hosting must route SPA paths (including the bank
 return and email routes) to `index.html` and proxy `/api` to the backend.
 
 ## Verification
+
+The November backend features are integrated:
+
+- Assigned seats: the event ticket picker sends `seatIds` beside standing ticket quantities,
+  refreshes availability, and shows seat labels on orders, tickets and check-in results.
+  Organizers configure modes, section prices and blocked seats from each event's seating page;
+  admins manage venue layouts under `/admin/dashboard/venues`. When creating a venue,
+  choosing a layout derives capacity from the map; capacity is required only without a layout.
+- Calendar links and authenticated `.ics` downloads are available on events and tickets.
+  Signed-in users can report another organizer's event; administrators review reports under
+  `/admin/dashboard/reports`, with event suspension as a separate action.
+- `/admin/dashboard` opens the monitoring overview. Events, orders, payments, refunds and
+  campaigns have paginated searches. Settings control future activation and processing fees
+  and provide authenticated CSV downloads. `/admin/users` supports filtered search and suspension.
+- `/organizer/payouts` and `/admin/dashboard/payouts` show simulated payout breakdowns;
+  admins can hold, release and pay them. Completed events link to their payout details.
+- Organizer and admin modules load on demand. Tests render asynchronous route boundaries
+  and use mocked APIs without creating live orders, reports, accounts or payments.
 
 Run `npm test` for API contract and React route-rendering regressions, then
 `npm run build` for TypeScript and the production build. Tests use mocked
@@ -154,7 +183,8 @@ pages, and organizers can upload or remove posters using
 `POST`/`DELETE /api/events/{eventId}/poster`. Uploads are restricted to JPEG,
 PNG, or WebP files up to 5 MB. Published public/unlisted posters load directly;
 organizer pages fetch draft/private posters with the saved bearer token and a
-blob URL. Venue maps and seat selection are not part of this API change.
+blob URL. Assigned seating is configured per event, with venue layouts and section
+pricing; attendees choose specific seats, including mixed seated and standing orders.
 
 The backend's update mapper ignores null fields. As a result, clearing optional
 end/registration dates or capacity is not currently supported: an empty field
@@ -162,9 +192,10 @@ is omitted and its previous value remains. To support clearing these values,
 the backend needs an explicit patch/clear contract (for example JSON Merge
 Patch or dedicated clear flags); ordinary nulls currently mean "leave unchanged".
 
-To grant access, the backend must assign the `ORGANIZER` role and make the
-organizer profile available to that user. The user also needs at least one
-venue before creating an event. Keep these authorization checks on the backend;
+Attendees can become organizers from the header, /organizer, or account settings.
+POST /api/organizers/profile returns the profile and a replacement token with the
+ORGANIZER role. Paid sales still require verification and activation.
+The user also needs a venue before creating an event. Keep authorization on the backend;
 the frontend role check must never be treated as a security boundary.
 
 Temporary workarounds until the backend adds them:

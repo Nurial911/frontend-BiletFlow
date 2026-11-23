@@ -1,7 +1,9 @@
+import { CalendarMenu, ReportEventForm } from "../components/events/EventExtras";
 import { useLanguage } from "../i18n/LanguageContext";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getOrganizerProfile } from "../api/events";
 import { ApiError } from "../api/client";
 import { createOrder, type CheckoutDetails, type OrderItemInput } from "../api/orders";
 import { useAuth } from "../auth/AuthContext";
@@ -22,10 +24,17 @@ export default function EventPage() {
   const initialPromo = params.get("promo") ?? storedPromo;
   const { data: event, isLoading, error, refetch } = useEvent(id);
   const { data: types, isLoading: typesLoading } = useTicketTypes(id);
-  const { isLoggedIn, openLogin } = useAuth();
+  const { user, isLoggedIn, openLogin } = useAuth();
+  const queryClient = useQueryClient();
+  const ownProfile = useQuery({ queryKey: ["organizer-profile"], queryFn: getOrganizerProfile, enabled: user?.role.replace(/^ROLE_/, "") === "ORGANIZER" });
   const orderMutation = useMutation({
     mutationFn: ({ items, details }: { items: OrderItemInput[]; details: CheckoutDetails }) => createOrder(id, items, details),
     onSuccess: (order) => navigate(`/orders/${order.id}`),
+    // A picked seat may have been taken meanwhile: show the current seat map.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["seat-map", id] });
+      void queryClient.invalidateQueries({ queryKey: ["seat-section", id] });
+    },
   });
 
   if (isLoading) return <EventPageSkeleton />;
@@ -146,9 +155,11 @@ export default function EventPage() {
               {orderMutation.error instanceof Error ? tx(orderMutation.error.message) : tx("Не удалось создать заказ.")}
             </p>
           )}
-          <TicketSelector key={`${id}:${initialPromo}`} eventId={id} types={visibleTypes} initialPromo={initialPromo} paidSalesActive={event.paidSalesActive} blocked={event.suspended || event.status === "CANCELLED" || event.status === "DRAFT"} onContinue={onContinue} busy={orderMutation.isPending} />
+          <TicketSelector key={`${id}:${initialPromo}`} eventId={id} types={visibleTypes} initialPromo={initialPromo} paidSalesActive={event.paidSalesActive} seatingMode={event.seatingMode} blocked={event.suspended || event.status === "CANCELLED" || event.status === "DRAFT"} onContinue={onContinue} busy={orderMutation.isPending} />
         </section>
       )}
+      <CalendarMenu eventId={id} cancelled={event.status === "CANCELLED"} />
+      {isLoggedIn && (user?.role.replace(/^ROLE_/, "") !== "ORGANIZER" || (ownProfile.data && ownProfile.data.id !== event.organizerId)) && <ReportEventForm eventId={id} />}
       <Link to={`/support/new?eventId=${id}`} className="mt-6 inline-block text-sm underline">{tx("Задать вопрос о событии")}</Link>
     </article>
   );

@@ -7,12 +7,15 @@ export interface OrderItemInput {
   quantity: number;
 }
 
-// POST /api/orders — creates an order with status PENDING
-export interface CheckoutDetails { attendeeName?: string; promoCode?: string }
-export const createOrder = (eventId: number, items: OrderItemInput[], details: CheckoutDetails = {}) =>
-  api<Order>("/api/orders", { method: "POST", body: { eventId, items, ...details } });
-export const quoteOrder = (eventId: number, items: OrderItemInput[], promoCode?: string) =>
-  api<OrderQuote>("/api/orders/quote", { method: "POST", body: { eventId, items, promoCode } });
+// POST /api/orders — creates an order with status PENDING.
+// seatIds: seats picked on the seat map of an assigned-seating event; each seat's section
+// decides its ticket type and price, so seated tickets are not also listed in items.
+export interface CheckoutDetails { attendeeName?: string; promoCode?: string; seatIds?: number[] }
+const seatField = (seatIds?: number[]) => (seatIds && seatIds.length > 0 ? { seatIds } : {});
+export const createOrder = (eventId: number, items: OrderItemInput[], { seatIds, ...details }: CheckoutDetails = {}) =>
+  api<Order>("/api/orders", { method: "POST", body: { eventId, items, ...details, ...seatField(seatIds) } });
+export const quoteOrder = (eventId: number, items: OrderItemInput[], promoCode?: string, seatIds?: number[]) =>
+  api<OrderQuote>("/api/orders/quote", { method: "POST", body: { eventId, items, promoCode, ...seatField(seatIds) } });
 export const openPaymentSession = (id: number) => api<PaymentSession>(`/api/orders/${id}/payment-session`, { method: "POST" });
 export const checkPayment = (id: number) => api<Order>(`/api/orders/${id}/payment-check`, { method: "POST" });
 export const getPayments = (id: number) => api<Payment[]>(`/api/orders/${id}/payments`);

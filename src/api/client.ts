@@ -8,6 +8,19 @@ export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const saveToken = (token: string) => localStorage.setItem(TOKEN_KEY, token);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
+// Subscribers keep React auth state in sync when any authenticated call is rejected.
+const authFailureListeners = new Set<(message: string) => void>();
+export function onAuthFailure(listener: (message: string) => void) {
+  authFailureListeners.add(listener);
+  return () => { authFailureListeners.delete(listener); };
+}
+function rejectAuthentication(status: number, message: string, token: string | null) {
+  if (token && getToken() === token && (status === 401 || status === 403)) {
+    clearToken();
+    authFailureListeners.forEach(listener => listener(message));
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -45,7 +58,9 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, await readErrorMessage(response));
+    const message = await readErrorMessage(response);
+    rejectAuthentication(response.status, message, token);
+    throw new ApiError(response.status, message);
   }
 
   const text = await response.text();
@@ -64,7 +79,9 @@ export async function apiBlob(path: string): Promise<Blob> {
     throw new ApiError(0, "Нет связи с сервером. Проверьте интернет.");
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await readErrorMessage(response));
+    const message = await readErrorMessage(response);
+    rejectAuthentication(response.status, message, token);
+    throw new ApiError(response.status, message);
   }
   return response.blob();
 }

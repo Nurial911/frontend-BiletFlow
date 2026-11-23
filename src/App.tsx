@@ -1,31 +1,48 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { PageLayout } from "./components/layout/PageLayout";
 import HomePage from "./pages/HomePage";
 import EventPage from "./pages/EventPage";
 import OrderConfirmationPage from "./pages/OrderConfirmationPage";
-import { AccountSettingsPage, EventCheckInPage, MyAccountPage, PlatformAdminPage } from "./pages/AccountPages";
-import { AdminEventSalesPage, OrganizerEventStaffPage, OrganizerSalesPage } from "./pages/OrganizerInsightsPage";
 import { RoleGuard } from "./pages/RoleGuard";
 import NotFoundPage from "./pages/NotFoundPage";
 import { AuthActionPage } from "./pages/AuthPages";
 import NotificationsPage from "./pages/NotificationsPage";
 import EventHistoryPage from "./pages/EventHistoryPage";
 import { NewSupportCasePage, SupportCasePage, SupportListPage } from "./pages/SupportPages";
-import { ActivationPage, AdminActivationsPage, AdminVerificationPage, CampaignsPage } from "./pages/CommercePages";
-import {
-  CreateOrganizerEventPage,
-  EditOrganizerEventPage,
-  ManageOrganizerEventsPage,
-  MyOrganizerEventsPage,
-  OrganizerDashboardLayout,
-  OrganizerGuard,
-  OrganizerTicketsPage,
-} from "./pages/OrganizerPage";
 
+const AdminOverviewPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminOverviewPage })));
+const AdminSearchPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminSearchPage })));
+const AdminSettingsPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminSettingsPage })));
+const AdminReportsPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminReportsPage })));
+const AdminReportPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminReportPage })));
+const PayoutsPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.PayoutsPage })));
+const AdminPayoutPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.AdminPayoutPage })));
+const EventPayoutPage = lazy(() => import("./pages/PlatformPages").then(m => ({ default: m.EventPayoutPage })));
+const SeatingSetupPage = lazy(() => import("./pages/SeatingSetupPage"));
+const VenueLayoutsPage = lazy(() => import("./pages/SeatingSetupPage").then(m => ({ default: m.VenueLayoutsPage })));
+const AccountSettingsPage = lazy(() => import("./pages/AccountPages").then(m => ({ default: m.AccountSettingsPage })));
+const EventCheckInPage = lazy(() => import("./pages/AccountPages").then(m => ({ default: m.EventCheckInPage })));
+const MyAccountPage = lazy(() => import("./pages/AccountPages").then(m => ({ default: m.MyAccountPage })));
+const PlatformAdminPage = lazy(() => import("./pages/AccountPages").then(m => ({ default: m.PlatformAdminPage })));
+const AdminEventSalesPage = lazy(() => import("./pages/OrganizerInsightsPage").then(m => ({ default: m.AdminEventSalesPage })));
+const OrganizerEventStaffPage = lazy(() => import("./pages/OrganizerInsightsPage").then(m => ({ default: m.OrganizerEventStaffPage })));
+const OrganizerSalesPage = lazy(() => import("./pages/OrganizerInsightsPage").then(m => ({ default: m.OrganizerSalesPage })));
+const ActivationPage = lazy(() => import("./pages/CommercePages").then(m => ({ default: m.ActivationPage })));
+const AdminActivationsPage = lazy(() => import("./pages/CommercePages").then(m => ({ default: m.AdminActivationsPage })));
+const AdminVerificationPage = lazy(() => import("./pages/CommercePages").then(m => ({ default: m.AdminVerificationPage })));
+const CampaignsPage = lazy(() => import("./pages/CommercePages").then(m => ({ default: m.CampaignsPage })));
+const CreateOrganizerEventPage = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.CreateOrganizerEventPage })));
+const EditOrganizerEventPage = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.EditOrganizerEventPage })));
+const ManageOrganizerEventsPage = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.ManageOrganizerEventsPage })));
+const MyOrganizerEventsPage = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.MyOrganizerEventsPage })));
+const OrganizerDashboardLayout = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.OrganizerDashboardLayout })));
+const OrganizerGuard = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.OrganizerGuard })));
+const OrganizerTicketsPage = lazy(() => import("./pages/OrganizerPage").then(m => ({ default: m.OrganizerTicketsPage })));
 // Which page shows for which address.
 export default function App() {
   return (
-    <Routes>
+    <Suspense fallback={<div role="status" aria-busy="true" className="p-8">…</div>}><Routes>
       <Route element={<PageLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/events/:id" element={<EventPage />} />
@@ -43,8 +60,19 @@ export default function App() {
         <Route path="/staff" element={<RoleGuard roles={["EVENT_ADMIN", "EVENT_STAFF", "CHECK_IN_STAFF", "ORGANIZER", "PLATFORM_ADMIN", "ADMIN"]}><EventCheckInPage /></RoleGuard>} />
         <Route path="/admin/users" element={<RoleGuard roles={["PLATFORM_ADMIN", "ADMIN"]}><PlatformAdminPage /></RoleGuard>} />
         <Route path="/admin/dashboard" element={<RoleGuard roles={["PLATFORM_ADMIN", "ADMIN"]}><OrganizerDashboardLayout /></RoleGuard>}>
-          <Route index element={<Navigate to="events" replace />} />
-          <Route path="events" element={<MyOrganizerEventsPage />} />
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<AdminOverviewPage />} />
+          <Route path="orders" element={<AdminSearchPage key="orders" resource="orders" />} />
+          <Route path="payments" element={<AdminSearchPage key="payments" resource="payments" />} />
+          <Route path="refunds" element={<AdminSearchPage key="refunds" resource="refunds" />} />
+          <Route path="campaigns" element={<AdminSearchPage key="campaigns" resource="campaigns" />} />
+          <Route path="reports" element={<AdminReportsPage />} />
+          <Route path="reports/:reportId" element={<AdminReportPage />} />
+          <Route path="settings" element={<AdminSettingsPage />} />
+          <Route path="venues" element={<VenueLayoutsPage />} />
+          <Route path="payouts" element={<PayoutsPage admin />} />
+          <Route path="payouts/:payoutId" element={<AdminPayoutPage />} />
+          <Route path="events" element={<AdminSearchPage resource="events" />} />
           <Route path="events/:eventId/staff" element={<OrganizerEventStaffPage />} />
           <Route path="events/:eventId/history" element={<EventHistoryPage />} />
           <Route path="activations" element={<AdminActivationsPage />} />
@@ -63,6 +91,9 @@ export default function App() {
             <Route path="events/:eventId/campaigns" element={<CampaignsPage />} />
             <Route path="events/:eventId/history" element={<EventHistoryPage />} />
             <Route path="events/:eventId/activation" element={<ActivationPage />} />
+            <Route path="payouts" element={<PayoutsPage />} />
+            <Route path="events/:eventId/payout" element={<EventPayoutPage />} />
+            <Route path="events/:eventId/seating" element={<SeatingSetupPage />} />
             <Route path="create" element={<CreateOrganizerEventPage />} />
             <Route path="manage" element={<ManageOrganizerEventsPage />} />
             <Route path="sales" element={<OrganizerSalesPage />} />
@@ -70,6 +101,6 @@ export default function App() {
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes>
+    </Routes></Suspense>
   );
 }

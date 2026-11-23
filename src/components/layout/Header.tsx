@@ -73,6 +73,11 @@ export function Header() {
 
         <div className="ml-auto flex flex-wrap items-center gap-4 md:ml-0">
           {isLoggedIn && <><Link to="/notifications" className="text-sm font-semibold">{t("notifications")}{unread.data && unread.data.unread > 0 ? ` (${unread.data.unread})` : ""}</Link><Link to="/support" className="text-sm font-semibold">{t("support")}</Link></>}
+          {isLoggedIn && role === "ATTENDEE" && (
+            <Link to="/organizer" className="whitespace-nowrap text-sm font-semibold hover:underline">
+              {t("becomeOrganizer")}
+            </Link>
+          )}
           {isLoggedIn && role === "ORGANIZER" && (
             <Link to="/organizer/events" className="whitespace-nowrap text-sm font-semibold hover:underline">
               {t("organizer")}

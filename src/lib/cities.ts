@@ -24,7 +24,15 @@ export const cities = [
 ];
 export function venueCity(venue?: Pick<Venue, "address">): string | null {
   const address = venue?.address?.toLowerCase() ?? "";
+  // A selected city is saved at the start of new venue addresses. Prefer it
+  // over city names occurring later in street names or other address details.
+  const explicit = addressCityPrefix(address);
+  if (explicit) return explicit;
   return cities.find(city => city.aliases.some(alias => new RegExp(`(^|[^\\p{L}\\p{N}])${alias}($|[^\\p{L}\\p{N}])`, "u").test(address)))?.id ?? null;
+}
+export function addressCityPrefix(address: string): string | null {
+  const text = address.trim().toLowerCase();
+  return cities.find(city => city.aliases.some(alias => new RegExp(`^(?:г\\.?\\s*)?${alias}(?:\\s*,|$)`, "u").test(text)))?.id ?? null;
 }
 export const cityLabel = (id: string, language: Language) => cities.find(city => city.id === id)?.[language];
 export function catalogParams(params: URLSearchParams) {

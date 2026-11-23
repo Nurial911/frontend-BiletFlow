@@ -5,19 +5,23 @@ import { build } from "esbuild";
 // Bundle the actual TypeScript modules; tests need no browser or live backend.
 const bundle = await build({ stdin: { contents: `
   export * as orders from './src/api/orders';
+  export * as seating from './src/api/seating';
+  export * as platform from './src/api/platform';
+  export * as users from './src/api/users';
   export * as auth from './src/api/auth';
   export * as commerce from './src/api/commerce';
   export * as support from './src/api/support';
   export * as notifications from './src/api/notifications';
   export * as events from './src/api/events';
   export * as catalog from './src/lib/cities';
+  export * as venueForms from './src/lib/venues';
   export * as languageUtils from './src/lib/language';
   export * as pageLanguage from './src/i18n/translateText';
   export * as client from './src/api/client';
   export { startOrderPayment } from './src/lib/checkout';
   export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } from './src/lib/format';
 `, resolveDir: process.cwd() }, bundle: true, platform: "node", format: "esm", write: false });
-const { orders, auth, commerce, support, notifications, events, catalog, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { orders, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 let expected;
 let requests;
@@ -47,6 +51,106 @@ beforeEach(() => {
   };
 });
 afterEach(() => assert.equal(expected.length, 0, "All expected requests must have been made"));
+
+test("calendar links and calendar downloads use authenticated API requests", async () => {
+  request("/api/events/7/calendar", "GET", undefined, { cancelled: false, googleCalendarUrl: "https://calendar.google.com/calendar/render" });
+  assert.equal((await platform.getCalendar(7)).cancelled, false);
+  request("/api/events/7/calendar.ics", "GET", undefined, new Blob(["BEGIN:VCALENDAR"], { type: "text/calendar" }));
+  assert.equal(await (await platform.downloadCalendar(7)).text(), "BEGIN:VCALENDAR");
+});
+test("event report submission preserves duplicate-report errors and review is separate from suspension", async () => {
+  request("/api/events/7/reports", "POST", { reason: "FRAUD", message: "Evidence" }, { id: 4, status: "OPEN" }, 201);
+  assert.equal((await platform.reportEvent(7, "FRAUD", "Evidence")).status, "OPEN");
+  request("/api/events/7/reports", "POST", { reason: "OTHER" }, { message: "You already have an open report" }, 409);
+  await assert.rejects(platform.reportEvent(7,"OTHER"), e => e.status === 409 && e.message.includes("already"));
+  request("/api/admin/event-reports?status=OPEN&page=0", "GET", undefined, { content: [] });
+  await platform.getReports({ status: "OPEN", page: 0 });
+  request("/api/admin/event-reports/4", "GET", undefined, { id: 4 });
+  await platform.getReport(4);
+  request("/api/admin/event-reports/4/review", "POST", { outcome: "ACTIONED", note: "Reviewed" }, { id: 4, status: "ACTIONED" });
+  await platform.reviewReport(4, "ACTIONED", "Reviewed");
+});
+test("platform search encodes filters, settings use fee fields, and CSV stays authenticated", async () => {
+  request("/api/admin/overview", "GET", undefined, { openEventReports: 2 });
+  assert.equal((await platform.getOverview()).openEventReports, 2);
+  request("/api/admin/payments?q=A%26B&status=FAILED&page=0", "GET", undefined, { content: [] });
+  await platform.searchAdmin("payments", { q: "A&B", status: "FAILED", page: 0, provider: "" });
+  for (const resource of ["events", "orders", "refunds", "campaigns"]) {
+    request(`/api/admin/${resource}?page=1`, "GET", undefined, { content: [] });
+    await platform.searchAdmin(resource, { page: 1 });
+  }
+  request("/api/admin/settings", "GET", undefined, { activationFeeKzt: 5000, processingFeePercent: 2 });
+  await platform.getSettings();
+  request("/api/admin/settings", "PUT", { activationFeeKzt: 4500, processingFeePercent: 1.5 }, {});
+  await platform.updateSettings({ activationFeeKzt: 4500, processingFeePercent: 1.5 });
+  request("/api/admin/reports/payments.csv?from=2026-11-01&to=2026-11-23", "GET", undefined, new Blob(["id,amount\n1,100"], { type: "text/csv" }));
+  assert.match(await (await platform.downloadCsv("payments", { from: "2026-11-01", to: "2026-11-23" })).text(), /1,100/);
+});
+test("payout lists, details and moderation use organizer and admin contracts", async () => {
+  request("/api/organizer/payouts?status=ON_HOLD", "GET", undefined, { content: [] });
+  await platform.getPayouts(false, { status: "ON_HOLD" });
+  request("/api/organizer/events/7/payout", "GET", undefined, { simulated: true, amount: 99 });
+  assert.equal((await platform.getEventPayout(7)).simulated, true);
+  request("/api/admin/payouts?q=Jazz", "GET", undefined, { content: [] });
+  await platform.getPayouts(true, { q: "Jazz" });
+  request("/api/admin/payouts/3", "GET", undefined, { id: 3 });
+  await platform.getPayout(3);
+  request("/api/admin/payouts/3/hold", "POST", { reason: "Review" }, {});
+  await platform.changePayout(3, "hold", "Review");
+  for (const action of ["release", "pay-now"]) {
+    request(`/api/admin/payouts/3/${action}`, "POST", undefined, {});
+    await platform.changePayout(3, action);
+  }
+});
+test("seating setup omits venue capacity for layouts and unlinks sections with null", async () => {
+  const venue = venueForms.prepareVenueRequest({ cityId: "astana", name: "Hall", address: "Abay 1", capacity: "", seatingLayout: "concert-hall" });
+  assert.equal(venue.seatingLayout, "concert-hall");
+  assert.equal("capacity" in venue, false);
+  request("/api/venues", "POST", venue, { id: 2, ...venue });
+  await events.createVenue(venue);
+  request("/api/venues/seating-layouts", "GET", undefined, [{ key: "arena", capacity: 16000 }]);
+  await seating.getSeatingLayouts();
+  request("/api/venues/2/seating-layout", "PUT", { seatingLayout: null }, {});
+  await seating.setVenueLayout(2, null);
+  request("/api/events/7/seating", "GET", undefined, { sections: [] });
+  await seating.getSeating(7);
+  request("/api/events/7/seating", "PUT", { mode: "ASSIGNED" }, { seatingMode: "ASSIGNED" });
+  await seating.setSeatingMode(7, "ASSIGNED");
+  request("/api/events/7/seating/sections/2", "PUT", { ticketTypeId: null }, {});
+  await seating.assignSection(7, 2, null);
+  request("/api/events/7/seating/seats", "PUT", { seatIds: [5, 6], blocked: true }, {});
+  await seating.setSeatsBlocked(7, [5, 6], true);
+});
+test("user search and suspension keep backend field names", async () => {
+  request("/api/users?page=0&size=20&q=A%26B&role=ATTENDEE&suspended=true", "GET", undefined, { content: [] });
+  await users.getUsers(0,20,{ q: "A&B", role: "ATTENDEE", suspended: "true" });
+  request("/api/users/3/suspend", "POST", { reason: "Review" }, {});
+  await users.setUserSuspended(3,true,"Review");
+  request("/api/users/3/unsuspend", "POST", undefined, {});
+  await users.setUserSuspended(3,false);
+});
+test("authenticated 403 signs out globally and preserves the suspension reason, including blob calls", async () => {
+  const messages = [];
+  const unsubscribe = client.onAuthFailure(message => messages.push(message));
+  try {
+    request("/api/events/7", "GET", undefined, { message: "Account suspended: review" }, 403);
+    await assert.rejects(events.getEvent(7), e => e.status === 403);
+    assert.equal(client.getToken(), null);
+    assert.deepEqual(messages, ["Account suspended: review"]);
+    client.saveToken("test-token");
+    request("/api/events/7/calendar.ics", "GET", undefined, { message: "Account suspended" }, 403);
+    await assert.rejects(platform.downloadCalendar(7));
+    assert.equal(client.getToken(), null);
+    assert.equal(messages.length, 2);
+  } finally { unsubscribe(); }
+});
+test("comma-separated backend errors are never rewritten as Russian date templates", () => {
+  for (const language of ["ru", "en", "kk"]) {
+    for (const message of ["North stand, sector 1", "This seat is no longer available: North stand, sector 1, row 3, seat 7"]) {
+      assert.equal(pageLanguage.translateText(language, message), message);
+    }
+  }
+});
 
 test("checkout sends attendee name and the server promo code; quote never creates an order", async () => {
   const items = [{ ticketTypeId: 3, quantity: 2 }];
@@ -198,6 +302,9 @@ test("payout and verification requests match organizer/admin contracts", async (
 test("event moderation sends the reason and preserves errors for a retry", async () => {
   request("/api/events/1/suspend", "POST", { reason: "Проверка мероприятия" }, { message: "Нет доступа" }, 403);
   await assert.rejects(events.setEventSuspended(1, true, "Проверка мероприятия"), error => error instanceof client.ApiError && error.status === 403 && error.message === "Нет доступа");
+  assert.equal(client.getToken(), null);
+  // Retry only after signing in again: authenticated 403 now invalidates the session.
+  client.saveToken("test-token");
   request("/api/events/1/suspend", "POST", { reason: "Проверка мероприятия" }, { id: 1, suspended: true, suspensionReason: "Проверка мероприятия" });
   assert.equal((await events.setEventSuspended(1, true, "Проверка мероприятия")).suspended, true);
   request("/api/events/1/unsuspend", "POST", undefined, { id: 1, suspended: false });
@@ -244,4 +351,55 @@ test("page translations preserve substitutions, whitespace and unknown server me
   assert.equal(pageLanguage.translateText("kk", "Unrecognized server message"), "Unrecognized server message");
   assert.equal(pageLanguage.translateStatus("en", "PUBLISHED"), "Published");
   assert.equal(pageLanguage.translateStatus("kk", "VALID"), "Жарамды");
+});
+test("separate venue city and street fields survive the current API round trip", async () => {
+  const body = venueForms.prepareVenueRequest({ name: " New hall ", cityId: "astana", address: "  ул. Алматы, 10 ", capacity: "200" });
+  assert.deepEqual(body, { name: "New hall", address: "Астана, ул. Алматы, 10", capacity: 200 });
+  request("/api/venues", "POST", body, { id: 91, ...body }, 201);
+  const saved = await events.createVenue(body);
+  assert.equal(catalog.venueCity(saved), "astana");
+  assert.equal(venueForms.venuesInCity([saved], "astana")[0].id, 91);
+  assert.equal(venueForms.venuesInCity([saved], "almaty").length, 0);
+});
+test("venue creation requires a known city and rejects mismatched city prefixes", () => {
+  const valid = { name: "Hall", cityId: "almaty", address: "Abay street 1", capacity: 100 };
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, cityId: "" }), /Выберите город площадки/);
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, cityId: "unknown" }), /Выберите город площадки/);
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, address: "Астана, Abay street 1" }), /не совпадает/);
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, address: " " }), /Укажите название/);
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, capacity: 0 }), /Укажите название/);
+  assert.throws(() => venueForms.prepareVenueRequest({ ...valid, address: "x".repeat(300) }), /300 символов/);
+  assert.equal(venueForms.prepareVenueRequest({ ...valid, address: "г. Алматы, Abay street 1" }).address, "г. Алматы, Abay street 1");
+});
+test("event venue validation blocks another city's venue but retains the current legacy venue", () => {
+  const venue = { id: 1, name: "Hall", address: "Astana", capacity: 100 };
+  assert.doesNotThrow(() => venueForms.validateEventVenue("astana", venue));
+  assert.throws(() => venueForms.validateEventVenue("almaty", venue), /Выберите площадку/);
+  assert.throws(() => venueForms.validateEventVenue("", venue), /Выберите город события/);
+  assert.throws(() => venueForms.validateEventVenue("astana", undefined), /Выберите площадку/);
+  const legacy = { ...venue, address: "Unknown street" };
+  assert.doesNotThrow(() => venueForms.validateEventVenue("unknown", legacy, 1));
+  assert.throws(() => venueForms.validateEventVenue("unknown", legacy, 2), /Выберите город события/);
+  assert.throws(() => venueForms.validateEventVenue("unknown", undefined), /Выберите город события/);
+});
+
+test("assigned seating loads the seat map and orders picked seats by seatIds next to standing items", async () => {
+  request("/api/events/10/seat-map", "GET", undefined, { eventId: 10, seatingMode: "ASSIGNED", sections: [{ id: 3, kind: "SEATED", ticketTypeId: 14 }, { id: 1, kind: "STANDING", ticketTypeId: 13 }] });
+  assert.equal((await seating.getSeatMap(10)).sections[0].kind, "SEATED");
+  request("/api/events/10/seat-map/sections/3", "GET", undefined, { section: { id: 3 }, seats: [{ id: 1001, row: "1", number: 1, status: "AVAILABLE" }] });
+  assert.equal((await seating.getSectionSeats(10, 3)).seats[0].id, 1001);
+  const standing = [{ ticketTypeId: 13, quantity: 1 }];
+  request("/api/orders/quote", "POST", { eventId: 10, items: standing, seatIds: [1001, 1002] }, { subtotalAmount: 36000, discountAmount: 0, totalAmount: 36000 });
+  assert.equal((await orders.quoteOrder(10, standing, undefined, [1001, 1002])).totalAmount, 36000);
+  request("/api/orders", "POST", { eventId: 10, items: [], seatIds: [1001] }, { ...order, eventId: 10 }, 201);
+  await orders.createOrder(10, [], { seatIds: [1001] });
+  // No seats picked: the request body stays exactly as for general admission.
+  request("/api/orders", "POST", { eventId: 10, items: standing }, { ...order, eventId: 10 }, 201);
+  await orders.createOrder(10, standing, { seatIds: [] });
+});
+test("becoming an organizer sends contact information and returns the new organizer token", async () => {
+  request("/api/organizers/profile", "POST", { contactInformation: "+7 700 000 00 00" }, { profile: { id: 9, userId: 4, contactInformation: "+7 700 000 00 00", verificationStatus: "UNVERIFIED" }, accessToken: "organizer-token" }, 201);
+  const created = await events.createOrganizerProfile("+7 700 000 00 00");
+  assert.equal(created.accessToken, "organizer-token");
+  assert.equal(created.profile.verificationStatus, "UNVERIFIED");
 });

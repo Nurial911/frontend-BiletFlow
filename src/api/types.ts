@@ -3,6 +3,9 @@
 // every place in the app that needs updating.
 
 export interface User {
+  suspended?: boolean;
+  suspendedAt?: string;
+  suspensionReason?: string;
   fullName?: string;
   id: number;
   email: string;
@@ -27,6 +30,7 @@ export interface AuthResponse {
 }
 
 export interface TicketTypeSales {
+  refunded?: number;
   ticketTypeId: number;
   name: string;
   price: number;
@@ -46,6 +50,9 @@ export interface DailySales {
 }
 
 export interface EventSales {
+  refunds?: number;
+  refundedOrders?: number;
+  ticketsRefunded?: number;
   discounts: number;
   netRevenue: number;
   processingFees: number;
@@ -69,6 +76,9 @@ export interface EventSales {
 }
 
 export interface SalesTotals {
+  refunds?: number;
+  refundedOrders?: number;
+  ticketsRefunded?: number;
   discounts: number;
   netRevenue: number;
   processingFees: number;
@@ -101,6 +111,7 @@ export interface EventOrder {
 }
 
 export interface Venue {
+  seatingLayout?: string | null;
   id: number;
   name: string;
   address: string;
@@ -108,16 +119,17 @@ export interface Venue {
 }
 
 export interface CreateVenueRequest {
+  seatingLayout?: string;
   name: string;
   address: string;
-  capacity: number;
+  capacity?: number;
 }
 
 export interface CreateTicketTypeRequest {
   name: string;
   description?: string;
   price: number;
-  quantity: number;
+  quantity?: number;
   salesStart?: string;
   salesEnd?: string;
   maxPerOrder?: number;
@@ -237,6 +249,8 @@ export interface Event {
   organizerId?: number;
   venue?: Venue;
   posterUrl?: string | null;
+  // ASSIGNED: buy seated sections on the seat map (see api/seating.ts)
+  seatingMode?: "GENERAL_ADMISSION" | "ASSIGNED";
 }
 
 export interface TicketType {
@@ -272,6 +286,12 @@ export interface OrderItem {
   ticketTypeName: string;
   quantity: number;
   unitPrice: number;
+  // Assigned seating; null for general admission. seatLabel reads e.g. "Stalls, row A, seat 5".
+  seatId?: number | null;
+  sectionName?: string | null;
+  rowLabel?: string | null;
+  seatNumber?: number | null;
+  seatLabel?: string | null;
 }
 
 export interface Order {
@@ -321,6 +341,8 @@ export interface Ticket {
   ticketTypeName: string;
   attendeeEmail: string;
   usedAt?: string;
+  seatId?: number | null;
+  seatLabel?: string | null; // assigned seating only
 }
 
 export interface CheckInStats {

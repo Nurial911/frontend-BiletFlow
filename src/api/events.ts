@@ -29,6 +29,12 @@ export const getTicketTypes = (eventId: number) =>
 
 export const getOrganizerProfile = () => api<OrganizerProfile>("/api/organizers/profile");
 
+// POST /api/organizers/profile — an ATTENDEE becomes an ORGANIZER (profile starts UNVERIFIED).
+// The old token still carries the attendee role, so the response brings a new one to use instead.
+export interface OrganizerProfileCreated { profile: OrganizerProfile; accessToken: string }
+export const createOrganizerProfile = (contactInformation: string) =>
+  api<OrganizerProfileCreated>("/api/organizers/profile", { method: "POST", body: { contactInformation } });
+
 export const getOrganizerEvents = (organizerId: number, page = 0, size = 100) =>
   api<Page<Event>>(`/api/events/organizer/${organizerId}?page=${page}&size=${size}`);
 
