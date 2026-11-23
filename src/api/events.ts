@@ -21,16 +21,25 @@ export const getEvents = (page = 0, size = 100) =>
   api<Page<Event>>(`/api/events?page=${page}&size=${size}`);
 
 // Every page of /api/events, so the catalog is not cut off at the first 100 events.
-// Stops at the last page; the page limit only guards against a backend that never reports one.
-export async function getAllEvents(size = 100, maxPages = 50): Promise<Page<Event>> {
+// Bound the traversal by the initial page count; do not silently cut off the catalog at 50 pages.
+// An explicit maxPages is available to bounded callers, which receive last:false when incomplete.
+export async function getAllEvents(size = 100, maxPages?: number): Promise<Page<Event>> {
   const first = await getEvents(0, size);
+  if (!Number.isSafeInteger(first.totalPages) || first.totalPages < 0 || (maxPages !== undefined && (!Number.isSafeInteger(maxPages) || maxPages < 1))) {
+    throw new Error("Не удалось загрузить весь каталог. Попробуйте ещё раз.");
+  }
   const content = [...first.content];
   let current = first;
-  for (let page = 1; page < maxPages && !current.last && page < current.totalPages && current.content.length > 0; page++) {
+  let page = 1;
+  const limit = Math.min(first.totalPages, maxPages ?? first.totalPages);
+  for (; page < limit && !current.last; page++) {
     current = await getEvents(page, size);
+    if ((current.number !== undefined && current.number !== page) || current.content.length === 0) {
+      throw new Error("Не удалось загрузить весь каталог. Попробуйте ещё раз.");
+    }
     content.push(...current.content);
   }
-  return { ...first, content, last: true };
+  return { ...first, content, last: !!current.last || page >= first.totalPages };
 }
 
 // GET /api/events/{id}

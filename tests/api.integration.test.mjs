@@ -5,6 +5,8 @@ import { build } from "esbuild";
 // Bundle the actual TypeScript modules; tests need no browser or live backend.
 const bundle = await build({ stdin: { contents: `
   export * as orders from './src/api/orders';
+  export { categoryKey, categoryLabel } from './src/lib/format';
+  export { posterUrlThroughProxy } from './src/lib/posterUrl';
   export * as sales from './src/api/sales';
   export { registrationState } from './src/lib/registration';
   export { summarizeInventory } from './src/lib/salesInventory';
@@ -25,7 +27,7 @@ const bundle = await build({ stdin: { contents: `
   export { startOrderPayment } from './src/lib/checkout';
   export { formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } from './src/lib/format';
 `, resolveDir: process.cwd() }, bundle: true, platform: "node", format: "esm", write: false });
-const { checkIn, orders, sales, registrationState, summarizeInventory, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { categoryKey, categoryLabel, posterUrlThroughProxy, checkIn, orders, sales, registrationState, summarizeInventory, seating, platform, users, auth, commerce, support, notifications, events, catalog, venueForms, languageUtils, pageLanguage, client, startOrderPayment, formatPrice, parseDate, formatLongDate, formatShortDate, weekdayShort, almatyTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 let expected;
 let requests;
@@ -55,6 +57,41 @@ beforeEach(() => {
   };
 });
 afterEach(() => assert.equal(expected.length, 0, "All expected requests must have been made"));
+
+test("category keys combine case, aliases and translated labels without merging unrelated categories", () => {
+  for (const value of ["Music","MUSIC"," music ","Музыка"]) assert.equal(categoryKey(value),categoryKey("Music"));
+  for (const value of ["Concert","concerts","Концерт","Концерты"]) assert.equal(categoryKey(value),categoryKey("Concert"));
+  assert.equal(categoryKey("Technology"),categoryKey("Технологиялар"));
+  assert.equal(categoryLabel("Технологиялар","en-GB"),"Technology");
+  assert.notEqual(categoryKey("Music"),categoryKey("Music theory"));
+  assert.equal(categoryKey("  Custom   Festival  "),categoryKey("custom festival"));
+});
+
+test("event posters use the same-origin proxy even when the API names an internal backend", () => {
+  assert.equal(posterUrlThroughProxy("http://backend:8080/api/events/7/poster?v=123"),"/api/events/7/poster?v=123");
+  assert.equal(posterUrlThroughProxy("https://biletflow.duckdns.org/api/events/7/poster?v=9"),"/api/events/7/poster?v=9");
+  assert.equal(posterUrlThroughProxy("/api/events/7/poster"),"/api/events/7/poster");
+  assert.equal(posterUrlThroughProxy("/images/local.png"),"/images/local.png");
+});
+
+test("catalog traversal includes pages after page 50 and reports an explicit caller limit honestly", async () => {
+  for (let page=0;page<51;page++) request(`/api/events?page=${page}&size=1`,"GET",undefined,{ content:[{id:page+1}],number:page,totalPages:51,last:page===50 });
+  const all = await events.getAllEvents(1);
+  assert.equal(all.content.length,51);
+  assert.equal(all.last,true);
+  for (let page=0;page<2;page++) request(`/api/events?page=${page}&size=1`,"GET",undefined,{ content:[{id:page+1}],number:page,totalPages:3,last:false });
+  const limited = await events.getAllEvents(1,2);
+  assert.equal(limited.content.length,2);
+  assert.equal(limited.last,false);
+});
+
+test("catalog rejects repeated pages and unexpected empty pages rather than silently returning partial results", async () => {
+  for (const second of [{ content:[{id:1}],number:0,totalPages:2,last:true },{ content:[],number:1,totalPages:2,last:true }]) {
+    request("/api/events?page=0&size=100","GET",undefined,{ content:[{id:1}],number:0,totalPages:2,last:false });
+    request("/api/events?page=1&size=100","GET",undefined,second);
+    await assert.rejects(events.getAllEvents(),/весь каталог/);
+  }
+});
 
 test("the catalog loads every page of events instead of stopping at the first 100", async () => {
   const events100 = from => Array.from({ length: 100 }, (_, i) => ({ id: from + i }));

@@ -598,3 +598,32 @@ test("sales analytics include real filter controls, server inventory metrics and
   assert.match(html,/12.?345/);
   assert.match(html,/12.?000/);
 });
+
+test("category navigation combines legacy aliases and old category URLs select every matching event", async () => {
+  const items = [
+    { ...event,id:801,title:"Lower code",category:"Music",minPrice:0 },
+    { ...event,id:802,title:"Upper code",category:"MUSIC",minPrice:0 },
+    { ...event,id:803,title:"Russian label",category:"Музыка",minPrice:0 },
+    { ...event,id:804,title:"Unrelated lesson",category:"Music theory",minPrice:0 },
+  ];
+  const seeds = [[["events"],page(items)]];
+  for (const category of ["Music","MUSIC","Музыка"]) {
+    const html = await renderRoute(`/?lang=ru&category=${encodeURIComponent(category)}`,null,seeds);
+    assert.match(html,/Lower code/);
+    assert.match(html,/Upper code/);
+    assert.match(html,/Russian label/);
+    assert.doesNotMatch(html,/Unrelated lesson/);
+    assert.equal((html.match(/>Музыка<\/a>/g)??[]).length,1);
+    assert.equal((html.match(/aria-current="page"/g)??[]).length,1);
+  }
+  const html = await renderRoute("/?lang=en",null,seeds);
+  assert.equal((html.match(/>Music<\/a>/g)??[]).length,1);
+});
+
+test("event sales explain processing fees and label net revenue after refunds", () => {
+  const html = renderSalesDetail({ revenue:10000,paidOrders:2,cancelledOrders:0,expiredOrders:0,discounts:1000,refunds:2000,netRevenue:7000,processingFees:200,estimatedPayout:6800,salesByDay:[] });
+  assert.match(html,/После скидок и возвратов/);
+  assert.match(html,/Комиссия обработки удерживается из дохода организатора/);
+  assert.doesNotMatch(html,/>После скидок<\/p>/);
+  assert.match(html,/6.?800/);
+});

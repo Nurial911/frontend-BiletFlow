@@ -96,9 +96,19 @@ const LOCALIZED_CATEGORIES: Record<string, { kk: string; en: string }> = {
   "Технологии": { kk: "Технологиялар", en: "Technology" }, "Встречи": { kk: "Кездесулер", en: "Meetups" }, "Вечеринки": { kk: "Кештер", en: "Parties" }, "Другое": { kk: "Басқа", en: "Other" },
 };
 const CATEGORY_ALIASES: Record<string, string> = { "концерт": "Концерты", "театр": "Театры", "музей": "Музеи и Выставки", "выставка": "Музеи и Выставки", "фестиваль": "Фестивали" };
+// A stable comparison key for legacy codes and translated labels. Stored event values stay intact.
+export function categoryKey(category: string): string {
+  const key = category.trim().toLowerCase().replace(/\s+/g, " ");
+  const label = CATEGORY_LABELS[key] ?? CATEGORY_ALIASES[key];
+  if (label) return label.toLowerCase();
+  for (const [source, variants] of Object.entries(LOCALIZED_CATEGORIES)) {
+    if ([source, variants.en, variants.kk].some(value => value.toLowerCase() === key)) return source.toLowerCase();
+  }
+  return key;
+}
 export function categoryLabel(category: string, locale = "ru-RU"): string {
   const key = category.trim().toLowerCase();
-  const known = CATEGORY_LABELS[key] ?? CATEGORY_ALIASES[key] ?? Object.keys(LOCALIZED_CATEGORIES).find(label => label.toLowerCase() === key);
+  const known = CATEGORY_LABELS[key] ?? CATEGORY_ALIASES[key] ?? Object.keys(LOCALIZED_CATEGORIES).find(label => label.toLowerCase() === categoryKey(category));
   if (known) return locale.startsWith("kk") ? LOCALIZED_CATEGORIES[known]?.kk ?? known : locale.startsWith("en") ? LOCALIZED_CATEGORIES[known]?.en ?? known : known;
   return category.charAt(0).toUpperCase() + category.slice(1);
 }

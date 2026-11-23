@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getEventPoster } from "../../api/events";
 import { useLanguage } from "../../i18n/LanguageContext";
+import { posterUrlThroughProxy } from "../../lib/posterUrl";
 
 export function EventPoster({
   posterUrl,
@@ -24,14 +25,14 @@ export function EventPoster({
       return;
     }
     if (!authenticated) {
-      setImageUrl(posterUrl);
+      setImageUrl(posterUrlThroughProxy(posterUrl));
       return;
     }
 
     let cancelled = false;
     let objectUrl: string | null = null;
     setImageUrl(null);
-    void getEventPoster(posterUrl)
+    void getEventPoster(posterUrlThroughProxy(posterUrl))
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);

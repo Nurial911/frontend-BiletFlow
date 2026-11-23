@@ -201,7 +201,12 @@ the frontend role check must never be treated as a security boundary.
 Temporary workarounds until the backend adds them:
 
 - **Search, date, city and category filters** run in the browser (`src/pages/HomePage.tsx`).
-- **Price on cards** comes from one ticket-types request per card (`src/components/events/EventCard.tsx`).
+- **Price on cards** uses `minPrice` when provided by the API. Until then, only mounted cards
+  request ticket types. The catalog initially mounts 24 cards and offers Show more.
+- **Catalog pagination** follows the initial backend page count without a hidden 50-page cutoff.
+  Unexpected empty or repeated page numbers produce a retryable error instead of a false complete result.
+  Category grouping and filtering normalize legacy case variants and known translated aliases;
+  stored event categories are preserved when editing.
 - **City** is a URL filter (`?city=astana`, `?city=almaty`, etc.) inferred from
   recognized city names in venue addresses. Unspecified/unrecognized addresses
   stay visible under All cities and City not specified; the frontend does not
@@ -218,7 +223,7 @@ Temporary workarounds until the backend adds them:
 
 ## Run it on your computer
 
-You need [Node.js](https://nodejs.org) 20 or newer (check with `node -v`).
+Use [Node.js](https://nodejs.org) 22.12 or newer (check with `node -v`). CI and the Docker build use Node 22.
 
 ```bash
 cd biletflow-web
@@ -298,3 +303,57 @@ src/
 - Halyk accepts only the exact test and production payment-api.js URLs from the official
   payment-page documentation: https://epayment.kz/ru/docs/platezhnaya-stranica .
   Other hosts, paths, ports, credentials, query strings and fragments are rejected.
+
+
+## Docker deployment
+
+Build and start the frontend with Docker Compose:
+
+```powershell
+docker compose up --build -d
+```
+
+Open http://localhost:8080 . Set FRONTEND_PORT to choose another local port.
+The default port binding is loopback-only; expose the service through the team's TLS ingress for production.
+BACKEND_ORIGIN defaults to https://biletflow.duckdns.org and must be an origin without a path or trailing slash.
+To use a backend on the same Compose network, set it to that service's internal address, for example
+http://backend:8080. For a backend running directly on Windows with Docker Desktop, use
+http://host.docker.internal:8080. This is a runtime setting and does not require rebuilding the frontend.
+The repository's Compose file contains only the frontend service; attach it to the team's existing backend
+network or copy this service into their Compose file. No backend or production server is modified by this setup.
+
+The image builds the app with npm ci and npm run build, then serves only dist with the official nginx image.
+The nginx template provides SPA fallback, an /api proxy preserving paths, queries, bodies and authorization,
+API error passthrough, /health, asset caching, and CSP/security headers. Event poster URLs from API responses
+are routed through the same-origin proxy so private posters and internal backend hostnames work.
+TLS verification remains enabled for HTTPS upstreams. Configure APP_FRONTEND_URL on the backend to the
+public HTTPS frontend origin for email, calendar and payment-return links. TLS termination and HSTS belong
+on the production ingress; this container listens on HTTP internally.
+
+CSP permits the two approved Halyk payment scripts and their payment frames. Inline scripts and eval are
+not permitted. Inline styles remain permitted for React charts, SVG maps and the bank widget's styles.
+This policy is for the built nginx deployment; Vite's development server does not use it.
+References: https://hub.docker.com/_/nginx and https://nginx.org/en/docs/http/ngx_http_proxy_module.html .
+
+CI has a separate deployment-smoke job. It builds the real image, starts a temporary mock backend and
+checks a deep SPA URL, assets, CSP headers, API query/body/auth forwarding, API errors and a PDF response.
+It never makes orders, reports, role changes or payments on the live VM. To run the same check with Docker:
+
+```powershell
+docker build -t biletflow-frontend:ci .
+node tests/deployment.smoke.mjs
+```
+
+## Recorded MVP scope and remaining backend work
+
+- Current event media support is one poster per event; a gallery is not implemented. This records the
+  current release scope, not a claim that an unprovided SRS has approved this restriction.
+- The current backend deducts processing fees from organizer revenue. Sales screens explain the deduction
+  and label net revenue after both discounts and refunds. Frontend checkout does not add a separate buyer fee.
+- JWTs are stored in localStorage in this academic MVP. They are readable by same-origin JavaScript, so CSP
+  reduces exposure but cannot make them equivalent to HttpOnly cookies. A cookie-based session model requires
+  a backend contract and CSRF/session design; it is not silently substituted here.
+- The web staff screen supports manual ticket codes and check-in from search. A separate RN/Expo app and
+  camera-scanning compliance cannot be established from this repository. Optional GA4 is not enabled.
+- Backend work still needed: explicit ACCOUNT_SUSPENDED error codes; server-side catalog filtering and
+  minPrice; filtering financial sales totals and campaign attribution, beyond the currently filtered daily series.

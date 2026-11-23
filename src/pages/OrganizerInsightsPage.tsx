@@ -94,6 +94,7 @@ export function OrganizerSalesPage() {
             <Metric label={tx("Комиссии")} value={formatPrice(summary.totals.processingFees, locale)} />
             <Metric label={tx("Ожидаемая выплата (симуляция)")} value={formatPrice(summary.totals.estimatedPayout, locale)} />
           </div>
+          <p className="text-sm text-muted">{tx("Комиссия обработки удерживается из дохода организатора и уже учтена в ожидаемой выплате.")}</p>
           {rows.map((row) => (
             <EventSalesCard
               key={row.eventId}
@@ -227,10 +228,11 @@ export function EventSalesDetail({ sales }: { sales: EventSales }) {
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
         <Metric label={tx("Скидки")} value={formatPrice(sales.discounts, locale)} />
-        <Metric label={tx("После скидок")} value={formatPrice(sales.netRevenue, locale)} />
+        <Metric label={tx("После скидок и возвратов")} value={formatPrice(sales.netRevenue, locale)} />
         <Metric label={tx("Комиссии")} value={formatPrice(sales.processingFees, locale)} />
         <Metric label={tx("Ожидаемая выплата (симуляция)")} value={formatPrice(sales.estimatedPayout, locale)} />
       </div>
+      <p className="mt-3 text-sm text-muted">{tx("Комиссия обработки удерживается из дохода организатора и уже учтена в ожидаемой выплате.")}</p>
       <h4 className="mt-5 font-semibold">{tx("Продажи по дням")}</h4>
       {sales.salesByDay.length === 0 ? <p className="mt-2 text-sm text-muted">{tx("Данных о продажах пока нет.")}</p> : (
         <div className="mt-2 space-y-2">

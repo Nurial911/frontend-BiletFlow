@@ -5,7 +5,7 @@ import { EventCard, EventCardSkeleton } from "../components/events/EventCard";
 import { HeroBanner } from "../components/events/HeroBanner";
 import { DateStrip } from "../components/events/DateStrip";
 import { ErrorMessage } from "../components/ui/ErrorMessage";
-import { categoryLabel, dayKey, parseDate } from "../lib/format";
+import { categoryKey, categoryLabel, dayKey, parseDate } from "../lib/format";
 import { useLanguage } from "../i18n/LanguageContext";
 import { cities, venueCity } from "../lib/cities";
 
@@ -49,7 +49,7 @@ export default function HomePage() {
   const shown = upcoming.filter(
     (e) =>
       (!q || e.title.toLowerCase().includes(q) || (e.venue?.name ?? "").toLowerCase().includes(q)) &&
-      (!category || e.category === category) &&
+      (!category || categoryKey(e.category) === categoryKey(category)) &&
       (!city || (city === "unknown" ? venueCity(e.venue) === null : venueCity(e.venue) === city)) &&
       (!date || dayKey(parseDate(e.startTime)) === date),
   );

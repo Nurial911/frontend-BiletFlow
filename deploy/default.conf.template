@@ -1,0 +1,55 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+    client_max_body_size 6m;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # React uses inline styles for charts and seat maps; scripts still require an allowed source.
+    # The bank's own payment/3DS iframe has its own policy.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://test-epay.epayment.kz/payform/payment-api.js https://epay.homebank.kz/payform/payment-api.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${BACKEND_ORIGIN}; font-src 'self' data:; connect-src 'self' ${BACKEND_ORIGIN} https://test-epay.epayment.kz https://epay.homebank.kz https://test-epay-api.epayment.kz https://epay-api.homebank.kz; frame-src https://test-epay.epayment.kz https://epay.homebank.kz; form-action 'self' https://test-epay.epayment.kz https://epay.homebank.kz; base-uri 'self'; object-src 'none'; frame-ancestors 'none'" always;
+
+    location = /health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # No trailing URI on proxy_pass: preserve /api/ and the original query string.
+    # API errors must stay API responses instead of becoming index.html.
+    location = /api {
+        default_type application/json;
+        return 404 '{"message":"Not found"}';
+    }
+
+    location ^~ /api/ {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Origin ${BACKEND_ORIGIN};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_read_timeout 60s;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+        expires 1y;
+    }
+
+    location = /index.html {
+        expires -1;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -17,3 +17,15 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  deployment-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: docker compose config --quiet
+      - run: docker build -t biletflow-frontend:ci .
+      - run: node tests/deployment.smoke.mjs

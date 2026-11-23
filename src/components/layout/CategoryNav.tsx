@@ -1,6 +1,6 @@
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { usePublicEvents } from "../../hooks/useEvents";
-import { categoryLabel } from "../../lib/format";
+import { categoryKey, categoryLabel } from "../../lib/format";
 import { useLanguage } from "../../i18n/LanguageContext";
 import { catalogParams } from "../../lib/cities";
 
@@ -21,7 +21,7 @@ export function CategoryNav() {
 
   if (pathname.startsWith("/organizer")) return null;
 
-  const categories = Array.from(new Set((events ?? []).map((e) => e.category).filter(Boolean)));
+  const categories = [...new Map((events ?? []).filter(event => event.category?.trim()).map(event => [categoryKey(event.category), event.category])).values()];
   if (categories.length === 0) return null;
 
   const link = (to: string, label: string, isActive: boolean) => (
@@ -39,7 +39,7 @@ export function CategoryNav() {
     <nav aria-label={t("categories")} className="border-b">
       <div className="mx-auto flex max-w-6xl gap-8 overflow-x-auto px-4">
         {link(categoryUrl(), t("all"), !active)}
-        {categories.map((c) => link(categoryUrl(c), categoryLabel(c, locale), active === c))}
+        {categories.map((c) => link(categoryUrl(c), categoryLabel(c, locale), !!active && categoryKey(active) === categoryKey(c)))}
       </div>
     </nav>
   );
