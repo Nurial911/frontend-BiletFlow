@@ -43,7 +43,7 @@ import { Modal } from "../components/ui/Modal";
 import { EventPoster } from "../components/events/EventPoster";
 import { EventSuspensionDialog } from "../components/events/EventSuspensionDialog";
 import { formatTicketSalesEnd, getEventTicketSaleState, getTicketSaleState } from "../lib/ticketSales";
-import { categoryLabel, eventCategoryOptions, formatDateTime } from "../lib/format";
+import { almatyTimestamp, categoryLabel, eventCategoryOptions, formatDateTime } from "../lib/format";
 import { cities, venueCity } from "../lib/cities";
 import { prepareVenueRequest, validateEventVenue, venuesInCity } from "../lib/venues";
 
@@ -765,7 +765,7 @@ function TicketTypeEditForm({
     if (!Number.isSafeInteger(maxPerOrder) || maxPerOrder <= 0 || (!assigned && maxPerOrder > quantity)) {
       return setValidationError(tx("Лимит на заказ должен быть положительным числом и не превышать количество билетов."));
     }
-    if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
+    if (salesStart && salesEnd && almatyTimestamp(salesStart) >= almatyTimestamp(salesEnd)) {
       return setValidationError(tx("Начало продаж должно быть раньше окончания."));
     }
     const request: UpdateTicketTypeRequest = { name, description, price, ...(!assigned ? { quantity } : {}), maxPerOrder };
@@ -818,7 +818,7 @@ function TicketTypeForm({
       const maxPerOrderValue = String(form.get("maxPerOrder") ?? "");
       const salesStart = String(form.get("salesStart") ?? "");
       const salesEnd = String(form.get("salesEnd") ?? "");
-      const eventStart = new Date(event.startTime).getTime();
+      const eventStart = almatyTimestamp(event.startTime);
 
       if (!name) throw new Error(tx("Укажите название типа билета."));
       if (!Number.isFinite(price) || price < 0 || !/^\d+(\.\d{1,2})?$/.test(String(form.get("price")))) {
@@ -836,13 +836,13 @@ function TicketTypeForm({
           throw new Error(tx("Лимит билетов в заказе должен быть положительным числом и не превышать количество билетов."));
         }
       }
-      if (salesStart && new Date(salesStart).getTime() >= eventStart) {
+      if (salesStart && almatyTimestamp(salesStart) >= eventStart) {
         throw new Error(tx("Продажи должны начаться до начала события."));
       }
-      if (salesEnd && new Date(salesEnd).getTime() > eventStart) {
+      if (salesEnd && almatyTimestamp(salesEnd) > eventStart) {
         throw new Error(tx("Продажи должны закончиться не позже начала события."));
       }
-      if (salesStart && salesEnd && new Date(salesStart).getTime() >= new Date(salesEnd).getTime()) {
+      if (salesStart && salesEnd && almatyTimestamp(salesStart) >= almatyTimestamp(salesEnd)) {
         throw new Error(tx("Начало продаж должно быть раньше окончания."));
       }
 
@@ -1201,7 +1201,8 @@ export function OrganizerEventForm({
   );
 }
 
-function readEventForm(
+// Exported for tests.
+export function readEventForm(
   form: FormData,
   existingStartTime?: string,
   selectedVenue?: Venue,
@@ -1218,7 +1219,7 @@ function readEventForm(
   if (!isVisibility(visibilityStatus)) {
     throw new Error("Выберите допустимую видимость события.");
   }
-  const startTimestamp = new Date(startTime).getTime();
+  const startTimestamp = almatyTimestamp(startTime);
   if (!Number.isFinite(startTimestamp)) {
     throw new Error("Укажите корректные дату и время начала.");
   }
@@ -1232,14 +1233,14 @@ function readEventForm(
   const registrationOpeningTime = String(form.get("registrationOpeningTime") ?? "");
   const registrationClosingTime = String(form.get("registrationClosingTime") ?? "");
   const capacityValue = String(form.get("capacity") ?? "");
-  if (endTime && new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+  if (endTime && almatyTimestamp(endTime) <= almatyTimestamp(startTime)) {
     throw new Error("Время окончания должно быть позже начала события.");
   }
   if (registrationOpeningTime && registrationClosingTime &&
-      new Date(registrationOpeningTime).getTime() >= new Date(registrationClosingTime).getTime()) {
+      almatyTimestamp(registrationOpeningTime) >= almatyTimestamp(registrationClosingTime)) {
     throw new Error("Регистрация должна открываться раньше закрытия.");
   }
-  if (registrationClosingTime && new Date(registrationClosingTime).getTime() > new Date(startTime).getTime()) {
+  if (registrationClosingTime && almatyTimestamp(registrationClosingTime) > almatyTimestamp(startTime)) {
     throw new Error("Регистрация должна закрыться до начала события.");
   }
 
